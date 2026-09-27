@@ -129,6 +129,23 @@ class ComposicionRazaService extends BaseService
             throw new AuthorizationException('No tiene permisos para actualizar esta composición de raza.');
         }
 
+        // Validación de consistencia: No permitir asignar una finca a una raza si está siendo utilizada
+        // por animales de otras fincas (a menos que la finca a la que se le asigne sea la única que la usa).
+        if (array_key_exists('finca_id', $data) && !empty($data['finca_id'])) {
+            $nuevaFincaId = (int) $data['finca_id'];
+
+            if ((int) $composicionRaza->finca_id !== $nuevaFincaId) {
+                $otrasFincas = Finca::whereHas('rebanos.animales', function ($q) use ($id) {
+                    $q->where('composicion_raza_id', $id);
+                })->where('id', '!=', $nuevaFincaId)->pluck('nombre');
+
+                if ($otrasFincas->isNotEmpty()) {
+                    $fincasNombres = $otrasFincas->unique()->join(', ');
+                    throw new ConflictHttpException("No se puede asignar esta raza a la finca seleccionada porque actualmente está siendo utilizada por animales de otra(s) finca(s) ({$fincasNombres}). Solo puede asignarse a una finca si es la única que la utiliza o si no tiene animales asociados.");
+                }
+            }
+        }
+
         $payload = [];
         if (array_key_exists('nombre', $data)) $payload['nombre'] = $data['nombre'];
         if (array_key_exists('siglas', $data)) $payload['siglas'] = $data['siglas'];
@@ -138,7 +155,7 @@ class ComposicionRazaService extends BaseService
         if (array_key_exists('origen', $data)) $payload['origen'] = $data['origen'];
         if (array_key_exists('caracteristica_especial', $data)) $payload['caracteristica_especial'] = $data['caracteristica_especial'];
         if (array_key_exists('proporcion_raza', $data)) $payload['proporcion_raza'] = $data['proporcion_raza'];
-        if (array_key_exists('finca_id', $data)) $payload['finca_id'] = $data['finca_id'];
+        if (array_key_exists('finca_id', $data)) $payload['finca_id'] = !empty($data['finca_id']) ? $data['finca_id'] : null;
         if (array_key_exists('tipo_animal_id', $data)) $payload['tipo_animal_id'] = $data['tipo_animal_id'];
 
         $composicionRaza->update($payload);

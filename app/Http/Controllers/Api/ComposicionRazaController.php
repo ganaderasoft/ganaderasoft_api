@@ -176,6 +176,11 @@ class ComposicionRazaController extends Controller
                 'success' => false,
                 'message' => $e->getMessage()
             ], Response::HTTP_FORBIDDEN);
+        } catch (ConflictHttpException $e) {
+            return response()->json([
+                'success' => false,
+                'message' => $e->getMessage()
+            ], Response::HTTP_CONFLICT);
         }
     }
 
