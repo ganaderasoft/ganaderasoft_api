@@ -320,6 +320,57 @@ Si desea probar cómo se comportará la aplicación en el servidor real (sin map
 docker compose -f docker-compose.prod.yml up -d --build
 ```
 
+## 🌿 Política de ramas (Git Flow) y nomenclatura
+
+El desarrollo de GanaderaSoft se rige bajo la metodología estándar de **Git Flow**. La estabilidad del código y los entornos se gestionan mediante las siguientes directrices obligatorias:
+
+### Reglas de protección y flujo de integración
+
+- 🚫 **Prohibición de push o merge directo**: Queda terminantemente prohibido realizar `git push` o fusiones directas sobre las ramas protegidas `main` y `develop`. Todo cambio debe integrarse a través de un **Pull Request (PR)**.
+- 👥 **Revisión de código obligatoria para `main` (Peer Review)**: Para fusionar un Pull Request hacia la rama `main`, es **obligatorio que al menos un integrante del equipo distinto al autor** revise y apruebe formalmente el PR. La fusión a `main` activa de forma automática la tubería de **Despliegue Continuo (CD)** hacia el VPS de producción.
+- 👤 **Integración en `develop` sin revisión externa**: Para integrar cambios hacia `develop`, **no es necesaria** la aprobación de un tercero; el propio desarrollador puede aprobar y fusionar su PR una vez concluidas y probadas sus tareas localmente.
+- 🤖 **Eliminación automática de ramas en GitHub y limpieza local**: Al fusionar cualquier PR, **GitHub elimina automáticamente la rama remota de origen (*head branch*)**. El desarrollador no debe borrarla en GitHub manualmente; únicamente debe eliminar la rama de su entorno local y sincronizar referencias.
+
+### Taxonomía y nomenclatura de ramas
+
+| Prefijo / Rama | Origen | Destino | Revisión | Propósito y ejemplo representativo |
+| :--- | :--- | :--- | :--- | :--- |
+| `main` | — | — | **Protegida** | Rama de producción. Despliegue continuo (CD) automático. |
+| `develop` | `main` | — | **Protegida** | Base de integración de desarrollo. Todo cambio converge aquí. |
+| `feat/` o `feature/` | `develop` | `develop` | Autor (Local) | Nueva funcionalidad o módulo. Ej: `feat/modulo-pesaje`. |
+| `fix/` o `bugfix/` | `develop` | `develop` | Autor (Local) | Corrección de fallos en desarrollo. Ej: `fix/calculo-indice-corporal`. |
+| `hotfix/` | `main` | `main` y `develop` | **Obligatoria (Par)** | Parche crítico urgente en producción. Ej: `hotfix/error-login-sanctum`. |
+| `docs/` | `develop` | `develop` | Autor (Local) | Documentación técnica y manuales. Ej: `docs/actualizar-api-endpoints`. |
+| `chore/` | `develop` | `develop` | Autor (Local) | Mantenimiento, dependencias o configuración Docker. Ej: `chore/actualizar-composer`. |
+| `refactor/` | `develop` | `develop` | Autor (Local) | Refactorización de código sin alterar lógica externa. Ej: `refactor/servicio-animales`. |
+| `test/` | `develop` | `develop` | Autor (Local) | Adición o ajuste de pruebas unitarias/integración. Ej: `test/finca-policy-tests`. |
+| `release/` | `develop` | `main` y `develop` | **Obligatoria (Par)** | Preparación de versión candidata a producción. Ej: `release/v1.0.0`. |
+
+### Flujo de trabajo operativo para el desarrollador
+
+```bash
+# 1. Actualizar rama develop y crear la rama de trabajo según el tipo de cambio
+git checkout develop
+git pull origin develop
+git checkout -b feat/nombre-tarea
+
+# 2. Realizar cambios, probar localmente y subir al repositorio remoto
+git add .
+git commit -m "feat(animales): agregar filtro por especie y rebaño"
+git push -u origin feat/nombre-tarea
+
+# 3. Abrir el Pull Request en GitHub hacia develop (o hacia main si es hotfix/)
+# - Si va a develop: el desarrollador aprueba y fusiona tras verificar pruebas.
+# - Si va a main: solicita revisión y aprobación formal de un compañero de equipo.
+
+# 4. Al fusionar, GitHub elimina la rama remota automáticamente.
+# Limpie su copia local y sincronice las referencias podadas:
+git checkout develop
+git pull origin develop
+git branch -d feat/nombre-tarea
+git fetch -p
+```
+
 ## 📚 Documentación adicional
 
 - **Colección de Postman**: Disponible en `docs/postman-collections/`
