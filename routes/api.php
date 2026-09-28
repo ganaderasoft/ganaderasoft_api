@@ -52,14 +52,24 @@ use Illuminate\Support\Facades\Route;
 
 /*
 |--------------------------------------------------------------------------
-| API Routes
+| Rutas de la API
 |--------------------------------------------------------------------------
 |
-| Here is where you can register API routes for your application. These
-| routes are loaded by the RouteServiceProvider and all of them will
-| be assigned to the "api" middleware group. Make something great!
+| Aquí es donde se registran las rutas de la API de la aplicación.
+| Estas rutas son cargadas por el RouteServiceProvider y a todas se
+| les asigna automáticamente el grupo de middleware "api".
 |
 */
+
+// Healthcheck público del API
+Route::get('/health', function () {
+    return response()->json([
+        'status'    => 'ok',
+        'service'   => 'GanaderaSoft API Core',
+        'version'   => '2.0.0',
+        'timestamp' => now()->toIso8601String(),
+    ]);
+});
 
 // Rutas públicas de autenticación
 Route::prefix('auth')->group(function () {
