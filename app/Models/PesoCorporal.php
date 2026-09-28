@@ -9,58 +9,52 @@ class PesoCorporal extends Model
 {
     use HasFactory;
 
-    protected $table = 'peso_corporal';
-
-    protected $primaryKey = 'id_Peso';
-
     protected $fillable = [
-        'Fecha_Peso',
-        'Peso',
-        'Comentario',
-        'peso_etapa_anid',
-        'peso_etapa_etid',
+        'animal_etapa_id',
+        'fecha_peso',
+        'peso',
+        'comentario',
     ];
 
     protected $casts = [
-        'Fecha_Peso' => 'date',
-        'Peso' => 'float',
+        'fecha_peso' => 'date',
+        'peso' => 'float',
     ];
 
     /**
-     * Get the etapa animal relationship.
-     * Using whereColumn to handle composite keys properly.
+     * Obtener el registro de etapa animal asociado.
+     * Usar whereColumn para manejar claves compuestas correctamente.
      */
     public function etapaAnimal()
     {
-        return $this->hasOne(EtapaAnimal::class, 'etan_animal_id', 'peso_etapa_anid')
-            ->whereColumn('etan_etapa_id', 'peso_corporal.peso_etapa_etid');
+        return $this->belongsTo(EtapaAnimal::class, 'animal_etapa_id');
     }
 
     /**
-     * Get the animal through the direct foreign key.
+     * Obtener el animal a través de la clave foránea directa.
      */
     public function animal()
     {
-        return $this->belongsTo(Animal::class, 'peso_etapa_anid', 'id_Animal');
+        return $this->hasOneThrough(Animal::class, EtapaAnimal::class, 'id', 'id', 'animal_etapa_id', 'animal_id');
     }
 
     /**
-     * Scope a query to filter by date range.
+     * Filtro para filtrar por date range.
      */
     public function scopeByDateRange($query, $startDate, $endDate = null)
     {
         if ($endDate) {
-            return $query->whereBetween('Fecha_Peso', [$startDate, $endDate]);
+            return $query->whereBetween('fecha_peso', [$startDate, $endDate]);
         }
 
-        return $query->where('Fecha_Peso', '>=', $startDate);
+        return $query->where('fecha_peso', '>=', $startDate);
     }
 
     /**
-     * Scope a query to filter by animal.
+     * Filtro para filtrar por animal.
      */
     public function scopeForAnimal($query, $animalId)
     {
-        return $query->where('peso_etapa_anid', $animalId);
+        return $query->where('animal_etapa_id', $animalId);
     }
 }

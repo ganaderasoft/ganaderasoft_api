@@ -3,120 +3,153 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
-use App\Models\ServicioAnimal;
+use App\Http\Resources\Reproduccion\ServicioAnimalResource;
+use App\Http\Middleware\Legacy\Reproduccion\NormalizeIndexServicioAnimal;
+use App\Http\Middleware\Legacy\Reproduccion\NormalizeShowServicioAnimal;
+use App\Http\Middleware\Legacy\Reproduccion\NormalizeStoreServicioAnimal;
+use App\Http\Middleware\Legacy\Reproduccion\NormalizeUpdateServicioAnimal;
+use App\Services\Reproduccion\ServicioAnimalService;
 use Illuminate\Http\Request;
 use Illuminate\Http\Response;
 use Illuminate\Support\Facades\Validator;
+use Illuminate\Database\Eloquent\ModelNotFoundException;
+use Illuminate\Validation\ValidationException;
 
 class ServicioAnimalController extends Controller
 {
+    public function __construct(
+        protected ServicioAnimalService $servicioService
+    ) {
+        $this->middleware(NormalizeIndexServicioAnimal::class)->only('index');
+        $this->middleware(NormalizeShowServicioAnimal::class)->only('show');
+        $this->middleware(NormalizeStoreServicioAnimal::class)->only('store');
+        $this->middleware(NormalizeUpdateServicioAnimal::class)->only('update');
+    }
+
     public function index(Request $request)
     {
-        $user = $request->user();
-        $query = ServicioAnimal::with('animal', 'semen', 'tecnico', 'registroCelo');
-
-        if ($request->has('animal_id')) {
-            $query->forAnimal($request->animal_id);
-        }
-        if ($request->has('tipo')) {
-            $query->byTipo($request->tipo);
-        }
-        if ($request->has('fecha_inicio')) {
-            $query->byDateRange($request->fecha_inicio, $request->get('fecha_fin'));
-        }
-
-        if (!$user->isAdmin() && $user->isPropietario()) {
-            $propietario = $user->propietario;
-            if ($propietario) {
-                $query->whereHas('animal.rebano.finca', function ($q) use ($propietario) {
-                    $q->where('id_Propietario', $propietario->id);
-                });
-            }
-        }
-
-        $records = $query->paginate(15);
+        $filters = $request->only(['animal_id', 'tipo', 'fecha_inicio', 'fecha_fin', 'nopaginate', 'finca_id', 'rebano_id']);
+        
+        $records = $this->servicioService->getPaginatedServicios($filters, $request->user());
 
         return response()->json([
-            'success'    => true,
-            'message'    => 'Registros de servicio',
-            'data'       => $records->items(),
-            'pagination' => [
-                'current_page' => $records->currentPage(),
-                'last_page'    => $records->lastPage(),
-                'per_page'     => $records->perPage(),
-                'total'        => $records->total(),
-            ],
-        ]);
+            'success' => true,
+            'message' => 'Registros de servicio obtenidos exitosamente',
+            'data'    => $this->formatCollection(ServicioAnimalResource::class, $records),
+        ], Response::HTTP_OK);
     }
 
     public function store(Request $request)
     {
         $validator = Validator::make($request->all(), [
-            'servicio_id_Animal'  => 'required|exists:animal,id_Animal',
-            'servicio_semen_id'   => 'nullable|exists:semen_toro,semen_id',
-            'servicio_id_Tecnico' => 'nullable|exists:personal_finca,id_Tecnico',
-            'servicio_tipo'       => 'nullable|string|max:11',
-            'servicio_fecha'      => 'nullable|date',
-            'servicio_observacion'=> 'nullable|string|max:100',
-            'servicio_celo_id'    => 'nullable|exists:registro_celo,celo_id',
+            'animal_id'         => 'required|exists:animals,id',
+            'semen_toro_id'     => 'nullable|exists:semen_toros,id',
+            'personal_finca_id' => 'nullable|exists:personal_fincas,id',
+            'registro_celo_id'  => 'nullable|exists:registro_celos,id',
+            'tipo'              => 'nullable|string|max:16',
+            'fecha'             => 'nullable|date',
+            'observacion'       => 'nullable|string|max:100',
         ]);
 
         if ($validator->fails()) {
-            return response()->json(['success' => false, 'errors' => $validator->errors()], Response::HTTP_UNPROCESSABLE_ENTITY);
+            return response()->json([
+                'success' => false, 
+                'message' => 'Datos de validación incorrectos',
+                'errors'  => $validator->errors()
+            ], Response::HTTP_UNPROCESSABLE_ENTITY);
         }
 
-        $servicio = ServicioAnimal::create($request->only([
-            'servicio_id_Animal', 'servicio_semen_id', 'servicio_id_Tecnico',
-            'servicio_tipo', 'servicio_fecha', 'servicio_observacion', 'servicio_celo_id',
-        ]));
+        try {
+            $servicio = $this->servicioService->createServicio($request->all(), request()->user());
 
-        return response()->json(['success' => true, 'message' => 'Servicio registrado', 'data' => $servicio->load('animal', 'semen')], Response::HTTP_CREATED);
+            return response()->json([
+                'success' => true,
+                'message' => 'Servicio registrado exitosamente',
+                'data'    => $this->formatResource(ServicioAnimalResource::class, $servicio),
+            ], Response::HTTP_CREATED);
+        } catch (ValidationException $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Error de validación',
+                'errors'  => $e->errors()
+            ], Response::HTTP_UNPROCESSABLE_ENTITY);
+        }
     }
 
     public function show($id)
     {
-        $servicio = ServicioAnimal::with('animal', 'semen', 'tecnico', 'registroCelo')->find($id);
-        if (!$servicio) {
-            return response()->json(['success' => false, 'message' => 'Servicio no encontrado'], Response::HTTP_NOT_FOUND);
+        try {
+            $servicio = $this->servicioService->getServicioById((int)$id, request()->user());
+
+            return response()->json([
+                'success' => true, 
+                'message' => 'Servicio obtenido exitosamente',
+                'data'    => $this->formatResource(ServicioAnimalResource::class, $servicio)
+            ], Response::HTTP_OK);
+        } catch (ModelNotFoundException $e) {
+            return response()->json([
+                'success' => false, 
+                'message' => 'Servicio no encontrado'
+            ], Response::HTTP_NOT_FOUND);
         }
-        return response()->json(['success' => true, 'data' => $servicio]);
     }
 
     public function update(Request $request, $id)
     {
-        $servicio = ServicioAnimal::find($id);
-        if (!$servicio) {
-            return response()->json(['success' => false, 'message' => 'Servicio no encontrado'], Response::HTTP_NOT_FOUND);
-        }
-
         $validator = Validator::make($request->all(), [
-            'servicio_semen_id'   => 'nullable|exists:semen_toro,semen_id',
-            'servicio_id_Tecnico' => 'nullable|exists:personal_finca,id_Tecnico',
-            'servicio_tipo'       => 'nullable|string|max:11',
-            'servicio_fecha'      => 'nullable|date',
-            'servicio_observacion'=> 'nullable|string|max:100',
-            'servicio_celo_id'    => 'nullable|exists:registro_celo,celo_id',
+            'animal_id'         => 'sometimes|exists:animals,id',
+            'semen_toro_id'     => 'nullable|exists:semen_toros,id',
+            'personal_finca_id' => 'nullable|exists:personal_fincas,id',
+            'registro_celo_id'  => 'nullable|exists:registro_celos,id',
+            'tipo'              => 'nullable|string|max:16',
+            'fecha'             => 'nullable|date',
+            'observacion'       => 'nullable|string|max:100',
         ]);
 
         if ($validator->fails()) {
-            return response()->json(['success' => false, 'errors' => $validator->errors()], Response::HTTP_UNPROCESSABLE_ENTITY);
+            return response()->json([
+                'success' => false, 
+                'message' => 'Datos de validación incorrectos',
+                'errors'  => $validator->errors()
+            ], Response::HTTP_UNPROCESSABLE_ENTITY);
         }
 
-        $servicio->update($request->only([
-            'servicio_semen_id', 'servicio_id_Tecnico', 'servicio_tipo',
-            'servicio_fecha', 'servicio_observacion', 'servicio_celo_id',
-        ]));
+        try {
+            $servicio = $this->servicioService->updateServicio((int)$id, $request->all(), request()->user());
 
-        return response()->json(['success' => true, 'message' => 'Servicio actualizado', 'data' => $servicio]);
+            return response()->json([
+                'success' => true,
+                'message' => 'Servicio actualizado exitosamente',
+                'data'    => $this->formatResource(ServicioAnimalResource::class, $servicio),
+            ], Response::HTTP_OK);
+        } catch (ModelNotFoundException $e) {
+            return response()->json([
+                'success' => false, 
+                'message' => 'Servicio no encontrado'
+            ], Response::HTTP_NOT_FOUND);
+        } catch (ValidationException $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Error de validación',
+                'errors'  => $e->errors()
+            ], Response::HTTP_UNPROCESSABLE_ENTITY);
+        }
     }
 
     public function destroy($id)
     {
-        $servicio = ServicioAnimal::find($id);
-        if (!$servicio) {
-            return response()->json(['success' => false, 'message' => 'Servicio no encontrado'], Response::HTTP_NOT_FOUND);
+        try {
+            $this->servicioService->deleteServicio((int)$id, request()->user());
+
+            return response()->json([
+                'success' => true, 
+                'message' => 'Servicio eliminado exitosamente'
+            ], Response::HTTP_OK);
+        } catch (ModelNotFoundException $e) {
+            return response()->json([
+                'success' => false, 
+                'message' => 'Servicio no encontrado'
+            ], Response::HTTP_NOT_FOUND);
         }
-        $servicio->delete();
-        return response()->json(['success' => true, 'message' => 'Servicio eliminado']);
     }
 }

@@ -9,50 +9,68 @@ class MovimientoRebano extends Model
 {
     use HasFactory;
 
-    protected $table = 'movimiento_rebano';
-    protected $primaryKey = 'id_Movimiento';
-
     protected $fillable = [
-        'id_Finca',
-        'id_Rebano',
-        'Rebano_Destino',
-        'id_Finca_Destino',
-        'id_Rebano_Destino',
-        'Comentario',
+        'finca_id',
+        'rebano_id',
+        'rebano_destino',
+        'finca_destino_id',
+        'rebano_destino_id',
+        'comentario',
     ];
 
+    /**
+     * Obtener finca origen asociado/a.
+     */
     public function fincaOrigen()
     {
-        return $this->belongsTo(Finca::class, 'id_Finca', 'id_Finca');
+        return $this->belongsTo(Finca::class, 'finca_id', 'id');
     }
 
+    /**
+     * Obtener rebano origen asociado/a.
+     */
     public function rebanoOrigen()
     {
-        return $this->belongsTo(Rebano::class, 'id_Rebano', 'id_Rebano');
+        return $this->belongsTo(Rebano::class, 'rebano_id', 'id');
     }
 
+    /**
+     * Obtener finca destino asociado/a.
+     */
     public function fincaDestino()
     {
-        return $this->belongsTo(Finca::class, 'id_Finca_Destino', 'id_Finca');
+        return $this->belongsTo(Finca::class, 'finca_destino_id', 'id');
     }
 
+    /**
+     * Obtener rebano destino asociado/a.
+     */
     public function rebanoDestino()
     {
-        return $this->belongsTo(Rebano::class, 'id_Rebano_Destino', 'id_Rebano');
+        return $this->belongsTo(Rebano::class, 'rebano_destino_id', 'id');
     }
 
+    /**
+     * Obtener animales asociado/a.
+     */
     public function animales()
     {
-        return $this->hasMany(MovimientoRebanoAnimal::class, 'id_Movimiento', 'id_Movimiento');
+        return $this->hasMany(MovimientoRebanoAnimal::class, 'movimiento_rebano_id', 'id');
     }
 
+    /**
+     * Filtro para buscar por for finca.
+     */
     public function scopeForFinca($query, $fincaId)
     {
-        return $query->where('id_Finca', $fincaId);
+        return $query->where('finca_id', $fincaId);
     }
 
+    /**
+     * Filtro para buscar por for rebano.
+     */
     public function scopeForRebano($query, $rebanoId)
     {
-        return $query->where('id_Rebano', $rebanoId);
+        return $query->where('rebano_id', $rebanoId);
     }
 }

@@ -9,63 +9,68 @@ class MedidasCorporales extends Model
 {
     use HasFactory;
 
-    protected $table = 'medidas_corporales';
-
-    protected $primaryKey = 'id_Medida';
-
     protected $fillable = [
-        'Altura_HC',
-        'Altura_HG',
-        'Perimetro_PT',
-        'Perimetro_PCA',
-        'Longitud_LC',
-        'Longitud_LG',
-        'Anchura_AG',
-        'medida_etapa_anid',
-        'medida_etapa_etid',
+        'animal_etapa_id',
+        'altura_hc',
+        'altura_hg',
+        'perimetro_pt',
+        'perimetro_pca',
+        'longitud_lc',
+        'longitud_lg',
+        'anchura_ag',
     ];
 
     protected $casts = [
-        'Altura_HC' => 'float',
-        'Altura_HG' => 'float',
-        'Perimetro_PT' => 'float',
-        'Perimetro_PCA' => 'float',
-        'Longitud_LC' => 'float',
-        'Longitud_LG' => 'float',
-        'Anchura_AG' => 'float',
+        'altura_hc' => 'float',
+        'altura_hg' => 'float',
+        'perimetro_pt' => 'float',
+        'perimetro_pca' => 'float',
+        'longitud_lc' => 'float',
+        'longitud_lg' => 'float',
+        'anchura_ag' => 'float',
     ];
 
     /**
-     * Get the etapa animal relationship.
-     * Using whereColumn to handle composite keys properly.
+     * Obtener el registro etapa animal asociado a estas medidas corporales.
      */
     public function etapaAnimal()
     {
-        return $this->hasOne(EtapaAnimal::class, 'etan_animal_id', 'medida_etapa_anid')
-            ->whereColumn('etan_etapa_id', 'medidas_corporales.medida_etapa_etid');
+        return $this->belongsTo(EtapaAnimal::class, 'animal_etapa_id', 'id');
     }
 
     /**
-     * Get the animal through the direct foreign key.
+     * Obtener la etapa asociada a estas medidas corporales a través de etapa animal.
+     */
+    public function etapa()
+    {
+        return $this->hasOneThrough(Etapa::class, EtapaAnimal::class, 'id', 'id', 'animal_etapa_id', 'etapa_id');
+    }
+
+    /**
+     * Obtener el animal asociado a estas medidas corporales a través de etapa animal.
      */
     public function animal()
     {
-        return $this->belongsTo(Animal::class, 'medida_etapa_anid', 'id_Animal');
+        return $this->hasOneThrough(Animal::class, EtapaAnimal::class, 'id', 'id', 'animal_etapa_id', 'animal_id');
     }
 
     /**
-     * Scope a query to filter by animal.
+     * Filtro para buscar medidas por animal.
      */
     public function scopeForAnimal($query, $animalId)
     {
-        return $query->where('medida_etapa_anid', $animalId);
+        return $query->whereHas('etapaAnimal', function ($q) use ($animalId) {
+            $q->where('animal_id', $animalId);
+        });
     }
 
     /**
-     * Scope a query to filter by etapa.
+     * Filtro para buscar medidas por etapa.
      */
     public function scopeForEtapa($query, $etapaId)
     {
-        return $query->where('medida_etapa_etid', $etapaId);
+        return $query->whereHas('etapaAnimal', function ($q) use ($etapaId) {
+            $q->where('etapa_id', $etapaId);
+        });
     }
 }

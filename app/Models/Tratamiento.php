@@ -9,36 +9,43 @@ class Tratamiento extends Model
 {
     use HasFactory;
 
-    protected $table = 'tratamiento';
-    protected $primaryKey = 'tratamiento_id';
-
     protected $fillable = [
-        'tratamiento_plan',
-        'tratamiento_fecha_ini',
-        'tratamiento_fecha_fin',
-        'tratamiento_diagnostico_id',
+        'diagnostico_id',
+        'plan',
+        'fecha_ini',
+        'fecha_fin',
     ];
 
     protected $casts = [
-        'tratamiento_fecha_ini' => 'date',
-        'tratamiento_fecha_fin' => 'date',
+        'fecha_ini' => 'date',
+        'fecha_fin' => 'date',
     ];
 
+    /**
+     * Obtener el diagnóstico asociado a este tratamiento.
+     */
     public function diagnostico()
     {
-        return $this->belongsTo(Diagnostico::class, 'tratamiento_diagnostico_id', 'diagnostico_id');
+        return $this->belongsTo(Diagnostico::class, 'diagnostico_id', 'id');
     }
 
+    /**
+     * Filtro para buscar por un rango de fechas.
+     */
     public function scopeByDateRange($query, $startDate, $endDate = null)
     {
         if ($endDate) {
-            return $query->whereBetween('tratamiento_fecha_ini', [$startDate, $endDate]);
+            return $query->whereBetween('fecha_ini', [$startDate, $endDate]);
         }
-        return $query->where('tratamiento_fecha_ini', '>=', $startDate);
+
+        return $query->where('fecha_ini', '>=', $startDate);
     }
 
+    /**
+     * Filtro para buscar tratamientos por diagnóstico.
+     */
     public function scopeForDiagnostico($query, $diagnosticoId)
     {
-        return $query->where('tratamiento_diagnostico_id', $diagnosticoId);
+        return $query->where('diagnostico_id', $diagnosticoId);
     }
 }

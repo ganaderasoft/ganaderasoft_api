@@ -9,74 +9,68 @@ class Etapa extends Model
 {
     use HasFactory;
 
-    protected $table = 'etapa';
-    protected $primaryKey = 'etapa_id';
-    
-    // This table doesn't have timestamps based on the SQL structure
-    public $timestamps = false;
-
     protected $fillable = [
-        'etapa_nombre',
-        'etapa_edad_ini',
-        'etapa_edad_fin',
-        'etapa_fk_tipo_animal_id',
-        'etapa_sexo',
+        'nombre',
+        'edad_ini',
+        'edad_fin',
+        'tipo_animal_id',
+        'sexo',
     ];
 
     protected $casts = [
-        'etapa_edad_ini' => 'integer',
-        'etapa_edad_fin' => 'integer',
+        'edad_ini' => 'integer',
+        'edad_fin' => 'integer',
     ];
 
     /**
-     * Get the tipo animal for this etapa.
+     * Obtener el/la tipo animal for this etapa.
      */
     public function tipoAnimal()
     {
-        return $this->belongsTo(TipoAnimal::class, 'etapa_fk_tipo_animal_id', 'tipo_animal_id');
+        return $this->belongsTo(TipoAnimal::class, 'tipo_animal_id', 'id');
     }
 
     /**
-     * Get the etapa animal records for this etapa.
+     * Obtener los registros de etapa animal para esta etapa.
      */
     public function etapaAnimales()
     {
-        return $this->hasMany(EtapaAnimal::class, 'etan_etapa_id', 'etapa_id');
+        return $this->hasMany(EtapaAnimal::class, 'etapa_id', 'id');
     }
 
     /**
-     * Scope a query to search by name.
+     * Filtro para buscar por nombre.
      */
     public function scopeByName($query, $name)
     {
-        return $query->where('etapa_nombre', 'like', '%' . $name . '%');
+        return $query->where('nombre', 'like', '%'.$name.'%');
     }
 
     /**
-     * Scope a query to filter by tipo animal.
+     * Filtro para filtrar por tipo animal.
      */
     public function scopeForTipoAnimal($query, $tipoAnimalId)
     {
-        return $query->where('etapa_fk_tipo_animal_id', $tipoAnimalId);
+        return $query->where('tipo_animal_id', $tipoAnimalId);
     }
 
     /**
-     * Scope a query to filter by sexo.
+     * Filtro para filtrar por sexo.
      */
     public function scopeBySexo($query, $sexo)
     {
-        return $query->where('etapa_sexo', $sexo);
+        return $query->where('sexo', $sexo);
     }
 
     /**
-     * Check if an age falls within this etapa.
+     * Verificar si una edad está dentro de esta etapa.
      */
     public function includesAge($age)
     {
-        if ($this->etapa_edad_fin === null) {
-            return $age >= $this->etapa_edad_ini;
+        if ($this->edad_fin === null) {
+            return $age >= $this->edad_ini;
         }
-        
-        return $age >= $this->etapa_edad_ini && $age <= $this->etapa_edad_fin;
+
+        return $age >= $this->edad_ini && $age <= $this->edad_fin;
     }
 }

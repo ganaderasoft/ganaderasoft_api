@@ -9,21 +9,15 @@ class TipoAnimal extends Model
 {
     use HasFactory;
 
-    protected $table = 'tipo_animal';
-    protected $primaryKey = 'tipo_animal_id';
-    
-    // This table doesn't have timestamps based on the SQL structure
-    public $timestamps = false;
-
     protected $fillable = [
-        'tipo_animal_nombre',
+        'nombre',
     ];
 
     /**
-     * Scope a query to search by name.
+     * Filtro para buscar por nombre.
      */
     public function scopeByName($query, $name)
     {
-        return $query->where('tipo_animal_nombre', 'like', '%' . $name . '%');
+        return $query->where('nombre', 'like', '%'.$name.'%');
     }
 }

@@ -11,18 +11,15 @@ class Animal extends Model
 {
     use HasFactory;
 
-    protected $table = 'animal';
-    protected $primaryKey = 'id_Animal';
-
     protected $fillable = [
-        'id_Rebano',
-        'Nombre',
+        'rebano_id',
+        'nombre',
         'codigo_animal',
-        'Sexo',
+        'sexo',
         'fecha_nacimiento',
-        'Procedencia',
-        'fk_composicion_raza',
+        'procedencia',
         'archivado',
+        'composicion_raza_id',
     ];
 
     protected $casts = [
@@ -31,105 +28,113 @@ class Animal extends Model
     ];
 
     /**
-     * Get the rebano that owns the animal.
+     * Obtener el/la rebano que posee este/a animal.
      */
     public function rebano()
     {
-        return $this->belongsTo(Rebano::class, 'id_Rebano', 'id_Rebano');
+        return $this->belongsTo(Rebano::class, 'rebano_id', 'id');
     }
 
     /**
-     * Get the composicion raza for the animal.
+     * Obtener el/la composicion raza para este/a animal.
      */
     public function composicionRaza()
     {
-        return $this->belongsTo(ComposicionRaza::class, 'fk_composicion_raza', 'id_Composicion');
+        return $this->belongsTo(ComposicionRaza::class, 'composicion_raza_id', 'id');
     }
 
     /**
-     * Get the finca through rebano.
+     * Obtener el/la finca a través de rebano.
      */
     public function finca()
     {
-        return $this->hasOneThrough(Finca::class, Rebano::class, 'id_Rebano', 'id_Finca', 'id_Rebano', 'id_Finca');
+        return $this->hasOneThrough(Finca::class, Rebano::class, 'id', 'id', 'rebano_id', 'finca_id');
     }
 
     /**
-     * Get the peso corporal records for the animal.
+     * Obtener los registros de peso corporal para este animal.
      */
     public function pesosCorporales()
     {
-        return $this->hasMany(PesoCorporal::class, 'peso_etapa_anid', 'id_Animal');
+        return $this->hasMany(PesoCorporal::class, 'animal_etapa_id', 'id');
     }
 
     /**
-     * Get the registro celo records for the animal.
+     * Obtener los registros de celo para este animal.
      */
     public function registrosCelo()
     {
-        return $this->hasMany(RegistroCelo::class, 'id_Animal', 'id_Animal');
+        return $this->hasMany(RegistroCelo::class, 'id', 'id');
     }
 
     /**
-     * Get the reproduccion records for the animal.
+     * Obtener los registros de reproducción para este animal.
      */
     public function reproducciones()
     {
-        return $this->hasMany(ReproduccionAnimal::class, 'id_Animal', 'id_Animal');
+        return $this->hasMany(ReproduccionAnimal::class, 'id', 'id');
     }
 
     /**
-     * Get the servicio records for the animal.
+     * Obtener los registros de servicio para este animal.
      */
     public function servicios()
     {
-        return $this->hasMany(ServicioAnimal::class, 'id_Animal', 'id_Animal');
+        return $this->hasMany(ServicioAnimal::class, 'id', 'id');
     }
 
     /**
-     * Get the estado records for the animal.
+     * Obtener los registros de vacunación para este animal.
+     */
+    public function vacunaciones()
+    {
+        return $this->hasMany(Vacunacion::class, 'animal_id', 'id');
+    }
+
+    /**
+     * Obtener los registros de estado para este animal.
      */
     public function estados()
     {
-        return $this->hasMany(EstadoAnimal::class, 'esan_fk_id_animal', 'id_Animal');
+        return $this->hasMany(EstadoAnimal::class, 'animal_id', 'id');
     }
 
     /**
-     * Get the current active estado for the animal.
+     * Obtener el/la current active estado para este/a animal.
      */
     public function estadoActual()
     {
-        return $this->hasOne(EstadoAnimal::class, 'esan_fk_id_animal', 'id_Animal')
+        return $this->hasOne(EstadoAnimal::class, 'animal_id', 'id')
             ->where(function ($query) {
-                $query->whereNull('esan_fecha_fin')
-                    ->orWhere('esan_fecha_fin', '>', now()->toDateString());
+                $query->whereNull('fecha_fin')
+                    ->orWhere('fecha_fin', '>', now()->toDateString());
             })
-            ->latest('esan_fecha_ini');
+            ->latest('fecha_ini');
     }
 
     /**
-     * Get the etapa animal records for the animal.
+     * Obtener los registros de etapa animal para este animal.
      */
     public function etapaAnimales()
     {
-        return $this->hasMany(EtapaAnimal::class, 'etan_animal_id', 'id_Animal');
+        return $this->hasMany(EtapaAnimal::class, 'animal_id', 'id');
     }
 
     /**
-     * Get the current active etapa for the animal.
+     * Obtener el/la current active etapa para este/a animal.
      */
     public function etapaActual()
     {
-        return $this->hasOne(EtapaAnimal::class, 'etan_animal_id', 'id_Animal')
+        return $this->hasOne(EtapaAnimal::class, 'animal_id', 'id')
             ->where(function ($query) {
-                $query->whereNull('etan_fecha_fin')
-                    ->orWhere('etan_fecha_fin', '>', now()->toDateString());
+                $query->whereNull('fecha_fin')
+                    ->orWhere('fecha_fin', '>', now()->toDateString());
             })
-            ->latest('etan_fecha_ini');
+            ->latest('fecha_ini');
     }
 
     /**
-     * Scope a query to only include active animals.
+     * Filtro para incluir solo animals activos/as.
      */
     public function scopeActive($query)
     {
@@ -137,29 +142,109 @@ class Animal extends Model
     }
 
     /**
-     * Scope a query to only include animals of a specific rebano.
+     * Filtro para incluir solo animals archivados/as.
      */
-    public function scopeForRebano($query, $rebanoId)
+    public function scopeArchived($query)
     {
-        return $query->where('id_Rebano', $rebanoId);
+        return $query->where('archivado', true);
+    }
+
+    // ─── Accessors de Edad Calculada (On-the-fly) ────────────────────────────
+
+    /**
+     * Calcula la edad exacta en días transcurridos desde la fecha de nacimiento.
+     *
+     * @return int|null
+     */
+    public function getEdadDiasAttribute(): ?int
+    {
+        if (!$this->fecha_nacimiento) {
+            return null;
+        }
+
+        return (int) $this->fecha_nacimiento->diffInDays(now());
     }
 
     /**
-     * Scope a query to only include animals of a specific finca.
+     * Calcula la edad total en meses transcurridos.
+     *
+     * @return int|null
+     */
+    public function getEdadMesesAttribute(): ?int
+    {
+        if (!$this->fecha_nacimiento) {
+            return null;
+        }
+
+        return (int) $this->fecha_nacimiento->diffInMonths(now());
+    }
+
+    /**
+     * Calcula la edad total en años cumplidos.
+     *
+     * @return int|null
+     */
+    public function getEdadAnosAttribute(): ?int
+    {
+        if (!$this->fecha_nacimiento) {
+            return null;
+        }
+
+        return (int) $this->fecha_nacimiento->diffInYears(now());
+    }
+
+    /**
+     * Devuelve una representación legible en texto de la edad del animal
+     * (ej. "2 años, 3 meses", "8 meses, 12 días", o "5 días").
+     *
+     * @return string
+     */
+    public function getEdadFormateadaAttribute(): string
+    {
+        if (!$this->fecha_nacimiento) {
+            return 'Desconocida';
+        }
+
+        $diff = $this->fecha_nacimiento->diff(now());
+        $partes = [];
+
+        if ($diff->y > 0) {
+            $partes[] = $diff->y . ' ' . ($diff->y === 1 ? 'año' : 'años');
+        }
+        if ($diff->m > 0) {
+            $partes[] = $diff->m . ' ' . ($diff->m === 1 ? 'mes' : 'meses');
+        }
+        if ($diff->y === 0 && $diff->m === 0) {
+            $partes[] = $diff->d . ' ' . ($diff->d === 1 ? 'día' : 'días');
+        }
+
+        return implode(', ', $partes) ?: '0 días';
+    }
+
+    /**
+     * Filtro para incluir animals de un/a rebano específico/a.
+     */
+    public function scopeForRebano($query, $rebanoId)
+    {
+        return $query->where('rebano_id', $rebanoId);
+    }
+
+    /**
+     * Filtro para incluir animals de un/a finca específico/a.
      */
     public function scopeForFinca($query, $fincaId)
     {
         return $query->whereHas('rebano', function ($q) use ($fincaId) {
-            $q->where('id_Finca', $fincaId);
+            $q->where('finca_id', $fincaId);
         });
     }
 
     /**
-     * Scope a query to filter by sex.
+     * Filtro para filtrar por sex.
      */
     public function scopeBySex($query, $sex)
     {
-        return $query->where('Sexo', $sex);
+        return $query->where('sexo', $sex);
     }
 
     // ─── Árbol genealógico ────────────────────────────────────────────────────
@@ -167,13 +252,13 @@ class Animal extends Model
     /** Registro ArbolGen donde este animal es hijo y tipo = 'Padre'. */
     public function registroPadre()
     {
-        return $this->hasOne(ArbolGen::class, 'id_hijo', 'id_Animal')->where('tipo', 'Padre');
+        return $this->hasOne(ArbolGen::class, 'hijo_id', 'id')->where('tipo', 'Padre');
     }
 
     /** Registro ArbolGen donde este animal es hijo y tipo = 'Madre'. */
     public function registroMadre()
     {
-        return $this->hasOne(ArbolGen::class, 'id_hijo', 'id_Animal')->where('tipo', 'Madre');
+        return $this->hasOne(ArbolGen::class, 'hijo_id', 'id')->where('tipo', 'Madre');
     }
 
     /** Animal padre de este animal. */
@@ -182,11 +267,11 @@ class Animal extends Model
         return $this->hasOneThrough(
             Animal::class,
             ArbolGen::class,
-            'id_hijo',   // FK en arbol_gen → este animal
-            'id_Animal', // FK en animal
-            'id_Animal', // PK de este animal
-            'id_padre'   // columna en arbol_gen con el id del progenitor
-        )->where('arbol_gen.tipo', 'Padre');
+            'hijo_id',   // FK en arbol_gen → este animal
+            'id', // FK en animal
+            'id', // PK de este animal
+            'padre_id'   // columna en arbol_gen con el id del progenitor
+        )->where('arbol_gens.tipo', 'Padre');
     }
 
     /** Animal madre de este animal. */
@@ -195,16 +280,16 @@ class Animal extends Model
         return $this->hasOneThrough(
             Animal::class,
             ArbolGen::class,
-            'id_hijo',
-            'id_Animal',
-            'id_Animal',
-            'id_padre'
-        )->where('arbol_gen.tipo', 'Madre');
+            'hijo_id',
+            'id',
+            'id',
+            'padre_id'
+        )->where('arbol_gens.tipo', 'Madre');
     }
 
     /** Hijos donde este animal aparece como progenitor. */
     public function hijos()
     {
-        return $this->hasMany(ArbolGen::class, 'id_padre', 'id_Animal');
+        return $this->hasMany(ArbolGen::class, 'padre_id', 'id');
     }
 }

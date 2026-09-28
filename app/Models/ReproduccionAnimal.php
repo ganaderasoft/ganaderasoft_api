@@ -9,46 +9,68 @@ class ReproduccionAnimal extends Model
 {
     use HasFactory;
 
-    protected $table = 'reproduccion_animal';
-    protected $primaryKey = 'repro_id';
-
     protected $fillable = [
-        'repro_fecha_reproduccion',
-        'repro_tipo_reproduccion',
-        'repro_observacion',
-        'repro_etapa_anid',
-        'repro_etapa_etid',
+        'animal_etapa_id',
+        'fecha_reproduccion',
+        'tipo_reproduccion',
+        'observacion',
     ];
 
     protected $casts = [
-        'repro_fecha_reproduccion' => 'date',
+        'fecha_reproduccion' => 'date',
     ];
 
+    /**
+     * Obtener el registro etapa animal asociado a esta reproducción.
+     */
+    public function etapaAnimal()
+    {
+        return $this->belongsTo(EtapaAnimal::class, 'animal_etapa_id', 'id');
+    }
+
+    /**
+     * Obtener el animal asociado a esta reproducción a través de etapa animal.
+     */
     public function animal()
     {
-        return $this->belongsTo(Animal::class, 'repro_etapa_anid', 'id_Animal');
+        return $this->hasOneThrough(Animal::class, EtapaAnimal::class, 'id', 'id', 'animal_etapa_id', 'animal_id');
     }
 
+    /**
+     * Obtener la etapa asociada a esta reproducción a través de etapa animal.
+     */
     public function etapa()
     {
-        return $this->belongsTo(Etapa::class, 'repro_etapa_etid', 'etapa_id');
+        return $this->hasOneThrough(Etapa::class, EtapaAnimal::class, 'id', 'id', 'animal_etapa_id', 'etapa_id');
     }
 
+    /**
+     * Filtro para buscar reproducciones por animal.
+     */
     public function scopeForAnimal($query, $animalId)
     {
-        return $query->where('repro_etapa_anid', $animalId);
+        return $query->whereHas('etapaAnimal', function ($q) use ($animalId) {
+            $q->where('animal_id', $animalId);
+        });
     }
 
+    /**
+     * Filtro para buscar por by tipo.
+     */
     public function scopeByTipo($query, $tipo)
     {
-        return $query->where('repro_tipo_reproduccion', $tipo);
+        return $query->where('tipo_reproduccion', $tipo);
     }
 
+    /**
+     * Filtro para buscar por by date range.
+     */
     public function scopeByDateRange($query, $startDate, $endDate = null)
     {
         if ($endDate) {
-            return $query->whereBetween('repro_fecha_reproduccion', [$startDate, $endDate]);
+            return $query->whereBetween('fecha_reproduccion', [$startDate, $endDate]);
         }
-        return $query->where('repro_fecha_reproduccion', '>=', $startDate);
+
+        return $query->where('fecha_reproduccion', '>=', $startDate);
     }
 }

@@ -9,58 +9,77 @@ class ServicioAnimal extends Model
 {
     use HasFactory;
 
-    protected $table = 'servicio_animal';
-    protected $primaryKey = 'servicio_id';
-
     protected $fillable = [
-        'servicio_id_Animal',
-        'servicio_semen_id',
-        'servicio_id_Tecnico',
-        'servicio_tipo',
-        'servicio_fecha',
-        'servicio_observacion',
-        'servicio_celo_id',
+        'animal_id',
+        'semen_toro_id',
+        'personal_finca_id',
+        'registro_celo_id',
+        'tipo',
+        'fecha',
+        'observacion',
     ];
 
     protected $casts = [
-        'servicio_fecha' => 'date',
+        'fecha' => 'date',
     ];
 
+    /**
+     * Obtener animal asociado/a.
+     */
     public function animal()
     {
-        return $this->belongsTo(Animal::class, 'servicio_id_Animal', 'id_Animal');
+        return $this->belongsTo(Animal::class, 'animal_id', 'id');
     }
 
+    /**
+     * Obtener semen asociado/a.
+     */
     public function semen()
     {
-        return $this->belongsTo(SemenToro::class, 'servicio_semen_id', 'semen_id');
+        return $this->belongsTo(SemenToro::class, 'semen_toro_id', 'id');
     }
 
+    /**
+     * Obtener tecnico asociado/a.
+     */
     public function tecnico()
     {
-        return $this->belongsTo(PersonalFinca::class, 'servicio_id_Tecnico', 'id_Tecnico');
+        return $this->belongsTo(PersonalFinca::class, 'personal_finca_id', 'id');
     }
 
+    /**
+     * Obtener registro celo asociado/a.
+     */
     public function registroCelo()
     {
-        return $this->belongsTo(RegistroCelo::class, 'servicio_celo_id', 'celo_id');
+        return $this->belongsTo(RegistroCelo::class, 'registro_celo_id', 'id');
     }
 
+    /**
+     * Filtro para buscar por for animal.
+     */
     public function scopeForAnimal($query, $animalId)
     {
-        return $query->where('servicio_id_Animal', $animalId);
+        return $query->where('animal_id', $animalId);
     }
 
+    /**
+     * Filtro para buscar por by tipo.
+     */
     public function scopeByTipo($query, $tipo)
     {
-        return $query->where('servicio_tipo', $tipo);
+        return $query->where('tipo', $tipo);
     }
 
+    /**
+     * Filtro para buscar por by date range.
+     */
     public function scopeByDateRange($query, $startDate, $endDate = null)
     {
         if ($endDate) {
-            return $query->whereBetween('servicio_fecha', [$startDate, $endDate]);
+            return $query->whereBetween('fecha', [$startDate, $endDate]);
         }
-        return $query->where('servicio_fecha', '>=', $startDate);
+
+        return $query->where('fecha', '>=', $startDate);
     }
 }

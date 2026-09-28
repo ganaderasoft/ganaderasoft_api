@@ -9,63 +9,60 @@ class Terreno extends Model
 {
     use HasFactory;
 
-    protected $table = 'terreno';
-    protected $primaryKey = 'id_Terreno';
-
     protected $fillable = [
-        'id_Finca',
-        'Superficie',
-        'Relieve',
-        'Suelo_Textura',
-        'ph_Suelo',
-        'Precipitacion',
-        'Velocidad_Viento',
-        'Temp_Anual',
-        'Temp_Min',
-        'Temp_Max',
-        'Radiacion',
-        'Fuente_Agua',
-        'Caudal_Disponible',
-        'Riego_Metodo',
+        'finca_id',
+        'superficie',
+        'relieve',
+        'suelo_textura',
+        'ph_suelo',
+        'precipitacion',
+        'velocidad_viento',
+        'temp_anual',
+        'temp_min',
+        'temp_max',
+        'radiacion',
+        'fuente_agua',
+        'caudal_disponible',
+        'riego_metodo',
     ];
 
     protected $casts = [
-        'Superficie' => 'float',
-        'Precipitacion' => 'float',
-        'Velocidad_Viento' => 'float',
-        'Radiacion' => 'float',
-        'Caudal_Disponible' => 'integer',
+        'superficie' => 'float',
+        'precipitacion' => 'float',
+        'velocidad_viento' => 'float',
+        'radiacion' => 'float',
+        'caudal_disponible' => 'integer',
     ];
 
     /**
-     * Get the finca that owns this terreno.
+     * Obtener la finca a la que pertenece este terreno.
      */
     public function finca()
     {
-        return $this->belongsTo(Finca::class, 'id_Finca', 'id_Finca');
+        return $this->belongsTo(Finca::class, 'finca_id', 'id');
     }
 
     /**
-     * Scope a query to filter by finca.
+     * Filtro para filtrar por finca.
      */
     public function scopeForFinca($query, $fincaId)
     {
-        return $query->where('id_Finca', $fincaId);
+        return $query->where('finca_id', $fincaId);
     }
 
     /**
-     * Scope a query to filter by relieve.
+     * Filtro para filtrar por relieve.
      */
     public function scopeByRelieve($query, $relieve)
     {
-        return $query->where('Relieve', $relieve);
+        return $query->where('relieve', $relieve);
     }
 
     /**
-     * Scope a query to filter by fuente de agua.
+     * Filtro para filtrar por fuente de agua.
      */
     public function scopeByFuenteAgua($query, $fuenteAgua)
     {
-        return $query->where('Fuente_Agua', $fuenteAgua);
+        return $query->where('fuente_agua', $fuenteAgua);
     }
 }

@@ -9,37 +9,48 @@ class SemenToro extends Model
 {
     use HasFactory;
 
-    protected $table = 'semen_toro';
-    protected $primaryKey = 'semen_id';
-
     protected $fillable = [
-        'id_Toro',
-        'semen_estado',
-        'semen_fecha',
+        'animal_id',
+        'estado',
+        'fecha',
+        'cantidad_pajuelas',
     ];
 
     protected $casts = [
-        'semen_estado' => 'boolean',
-        'semen_fecha'  => 'date',
+        'estado' => 'boolean',
+        'fecha' => 'date',
+        'cantidad_pajuelas' => 'integer',
     ];
 
+    /**
+     * Obtener toro asociado/a.
+     */
     public function toro()
     {
-        return $this->belongsTo(Animal::class, 'id_Toro', 'id_Animal');
+        return $this->belongsTo(Animal::class, 'animal_id', 'id');
     }
 
+    /**
+     * Obtener servicios asociado/a.
+     */
     public function servicios()
     {
-        return $this->hasMany(ServicioAnimal::class, 'servicio_semen_id', 'semen_id');
+        return $this->hasMany(ServicioAnimal::class, 'semen_toro_id', 'id');
     }
 
+    /**
+     * Filtro para buscar por activo.
+     */
     public function scopeActivo($query)
     {
-        return $query->where('semen_estado', true);
+        return $query->where('estado', true);
     }
 
+    /**
+     * Filtro para buscar por for toro.
+     */
     public function scopeForToro($query, $toroId)
     {
-        return $query->where('id_Toro', $toroId);
+        return $query->where('animal_id', $toroId);
     }
 }

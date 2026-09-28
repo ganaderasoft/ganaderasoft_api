@@ -9,50 +9,60 @@ class Propietario extends Model
 {
     use HasFactory;
 
-    protected $table = 'propietario';
-    
     protected $fillable = [
-        'id',
-        'id_Personal',
-        'Nombre',
-        'Apellido',
-        'Telefono',
-        'archivado',
+        'persona_id',
     ];
 
     protected $casts = [
-        'archivado' => 'boolean',
     ];
 
     /**
-     * Get the user that owns the propietario.
+     * Obtener la persona asociada a este propietario.
      */
-    public function user()
+    public function persona()
     {
-        return $this->belongsTo(User::class, 'id', 'id');
+        return $this->belongsTo(Persona::class, 'persona_id', 'id');
     }
 
     /**
-     * Get the fincas for the propietario.
+     * Obtener el/la fincas para este/a propietario.
      */
     public function fincas()
     {
-        return $this->hasMany(Finca::class, 'id_Propietario', 'id');
+        return $this->hasMany(Finca::class, 'propietario_id', 'id');
     }
 
     /**
-     * Get the full name of the propietario.
+     * Obtener las afiliaciones asociadas a este propietario.
+     */
+    public function afiliaciones()
+    {
+        return $this->hasMany(Afiliacion::class, 'propietario_id', 'id');
+    }
+
+    /**
+     * Obtener los hierros asociados a este propietario.
+     */
+    public function hierros()
+    {
+        return $this->hasMany(Hierro::class, 'propietario_id', 'id');
+    }
+
+    /**
+     * Obtener el/la full name of the propietario.
      */
     public function getFullNameAttribute(): string
     {
-        return $this->Nombre . ' ' . $this->Apellido;
+        return $this->persona ? trim($this->persona->nombre . ' ' . $this->persona->apellido) : '';
     }
 
     /**
-     * Scope a query to only include active propietarios.
+     * Filtro para incluir solo propietarios activos/as.
      */
     public function scopeActive($query)
     {
-        return $query->where('archivado', false);
+        return $query->whereHas('persona', function ($q) {
+            $q->where('status', 'activo')->orWhere('status', 1);
+        });
     }
 }

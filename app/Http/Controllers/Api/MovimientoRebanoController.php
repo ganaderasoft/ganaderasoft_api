@@ -3,146 +3,179 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
-use App\Models\Animal;
-use App\Models\MovimientoRebano;
-use App\Models\MovimientoRebanoAnimal;
+use App\Http\Resources\Rebano\MovimientoRebanoIndexResource;
+use App\Http\Resources\Rebano\MovimientoRebanoShowResource;
+use App\Http\Resources\Rebano\MovimientoRebanoStoreResource;
+use App\Http\Middleware\Legacy\Rebano\NormalizeIndexMovimientoRebano;
+use App\Http\Middleware\Legacy\Rebano\NormalizeShowMovimientoRebano;
+use App\Http\Middleware\Legacy\Rebano\NormalizeStoreMovimientoRebano;
+use App\Http\Middleware\Legacy\Rebano\NormalizeUpdateMovimientoRebano;
+use App\Services\Rebano\MovimientoRebanoService;
 use Illuminate\Http\Request;
 use Illuminate\Http\Response;
-use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Validator;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Database\Eloquent\ModelNotFoundException;
+use Symfony\Component\HttpKernel\Exception\UnprocessableEntityHttpException;
 
 class MovimientoRebanoController extends Controller
 {
-    public function index(Request $request)
-    {
-        $query = MovimientoRebano::with('fincaOrigen', 'rebanoOrigen', 'fincaDestino', 'rebanoDestino', 'animales.animal');
-
-        if ($request->has('id_finca')) {
-            $query->forFinca($request->id_finca);
-        }
-        if ($request->has('id_rebano')) {
-            $query->forRebano($request->id_rebano);
-        }
-
-        $records = $query->paginate(15);
-
-        return response()->json([
-            'success'    => true,
-            'message'    => 'Movimientos de rebaño',
-            'data'       => $records->items(),
-            'pagination' => [
-                'current_page' => $records->currentPage(),
-                'last_page'    => $records->lastPage(),
-                'per_page'     => $records->perPage(),
-                'total'        => $records->total(),
-            ],
-        ]);
+    /**
+     * Constructor del controlador.
+     * Inyecta el servicio de traslados y registra los middlewares legacy correspondientes.
+     *
+     * @param MovimientoRebanoService $movimientoService
+     */
+    public function __construct(
+        protected MovimientoRebanoService $movimientoService
+    ) {
+        $this->middleware(NormalizeIndexMovimientoRebano::class)->only('index');
+        $this->middleware(NormalizeShowMovimientoRebano::class)->only('show');
+        $this->middleware(NormalizeStoreMovimientoRebano::class)->only('store');
+        $this->middleware(NormalizeUpdateMovimientoRebano::class)->only('update');
     }
 
-    public function store(Request $request)
+    /**
+     * Devuelve el listado de movimientos de rebaño.
+     *
+     * @param Request $request
+     * @return \Illuminate\Http\JsonResponse
+     */
+    public function index(Request $request)
     {
-        $validator = Validator::make($request->all(), [
-            'id_Finca'          => 'required|exists:finca,id_Finca',
-            'id_Rebano'         => 'required|exists:rebano,id_Rebano',
-            'Rebano_Destino'    => 'nullable|string|max:30',
-            'id_Finca_Destino'  => 'required|exists:finca,id_Finca',
-            'id_Rebano_Destino' => 'required|exists:rebano,id_Rebano',
-            'Comentario'        => 'nullable|string|max:40',
-            'animales'          => 'required|array|min:1',
-            'animales.*'        => 'exists:animal,id_Animal',
-        ]);
-
-        if ($validator->fails()) {
-            return response()->json(['success' => false, 'errors' => $validator->errors()], Response::HTTP_UNPROCESSABLE_ENTITY);
-        }
-
-        if ((int) $request->id_Finca === (int) $request->id_Finca_Destino) {
-            return response()->json(['success' => false, 'message' => 'La finca de destino debe ser diferente a la de origen'], Response::HTTP_UNPROCESSABLE_ENTITY);
-        }
-
-        if ((int) $request->id_Rebano === (int) $request->id_Rebano_Destino) {
-            return response()->json(['success' => false, 'message' => 'El rebaño de destino debe ser diferente al de origen'], Response::HTTP_UNPROCESSABLE_ENTITY);
-        }
-
-        $animalIds = collect($request->animales)->map(fn ($id) => (int) $id)->unique()->values()->all();
-        $animalesOrigenCount = Animal::whereIn('id_Animal', $animalIds)
-            ->where('id_Rebano', (int) $request->id_Rebano)
-            ->count();
-
-        if ($animalesOrigenCount !== count($animalIds)) {
-            return response()->json(['success' => false, 'message' => 'Todos los animales seleccionados deben pertenecer al rebaño de origen'], Response::HTTP_UNPROCESSABLE_ENTITY);
-        }
-
-        $movimiento = DB::transaction(function () use ($request) {
-            $mov = MovimientoRebano::create($request->only([
-                'id_Finca', 'id_Rebano', 'Rebano_Destino',
-                'id_Finca_Destino', 'id_Rebano_Destino', 'Comentario',
-            ]));
-
-            $animalIds = collect($request->animales)->map(fn ($id) => (int) $id)->unique()->values()->all();
-            if (!empty($animalIds)) {
-                foreach ($animalIds as $animalId) {
-                    MovimientoRebanoAnimal::create([
-                        'id_Animal'    => $animalId,
-                        'id_Movimiento'=> $mov->id_Movimiento,
-                        'Estado'       => 'activo',
-                    ]);
-                }
-
-                Animal::whereIn('id_Animal', $animalIds)
-                    ->update(['id_Rebano' => (int) $request->id_Rebano_Destino]);
-            }
-
-            return $mov;
-        });
+        $filters = $request->only(['finca_id', 'rebano_id', 'nopaginate']);
+        $paginator = $this->movimientoService->listMovimientos($filters, request()->user());
 
         return response()->json([
             'success' => true,
-            'message' => 'Movimiento registrado',
-            'data'    => $movimiento->load('animales'),
-        ], Response::HTTP_CREATED);
+            'message' => 'Movimientos de rebaño obtenidos exitosamente',
+            'data'    => $this->formatCollection(MovimientoRebanoIndexResource::class, $paginator)
+        ], Response::HTTP_OK);
     }
 
-    public function show($id)
+    /**
+     * Registra un nuevo movimiento de rebaño y traslada los animales.
+     *
+     * @param Request $request
+     * @return \Illuminate\Http\JsonResponse
+     */
+    public function store(Request $request)
     {
-        $movimiento = MovimientoRebano::with('fincaOrigen', 'rebanoOrigen', 'fincaDestino', 'rebanoDestino', 'animales.animal')->find($id);
-        if (!$movimiento) {
-            return response()->json(['success' => false, 'message' => 'Movimiento no encontrado'], Response::HTTP_NOT_FOUND);
-        }
-        return response()->json(['success' => true, 'data' => $movimiento]);
-    }
-
-    public function update(Request $request, $id)
-    {
-        $movimiento = MovimientoRebano::find($id);
-        if (!$movimiento) {
-            return response()->json(['success' => false, 'message' => 'Movimiento no encontrado'], Response::HTTP_NOT_FOUND);
-        }
-
         $validator = Validator::make($request->all(), [
-            'Rebano_Destino' => 'nullable|string|max:30',
-            'Comentario'     => 'nullable|string|max:40',
+            'finca_id'          => 'required|exists:fincas,id',
+            'rebano_id'         => 'required|exists:rebanos,id',
+            'rebano_destino'    => 'nullable|string|max:30',
+            'finca_destino_id'  => 'required|exists:fincas,id',
+            'rebano_destino_id' => 'required|exists:rebanos,id',
+            'comentario'        => 'nullable|string|max:40',
+            'animales'          => 'required|array|min:1',
+            'animales.*'        => 'exists:animals,id',
         ]);
 
         if ($validator->fails()) {
-            return response()->json(['success' => false, 'errors' => $validator->errors()], Response::HTTP_UNPROCESSABLE_ENTITY);
+            return response()->json([
+                'success' => false,
+                'errors'  => $validator->errors()
+            ], Response::HTTP_UNPROCESSABLE_ENTITY);
         }
 
-        $movimiento->update($request->only(['Rebano_Destino', 'Comentario']));
+        try {
+            $movimiento = $this->movimientoService->createMovimiento($request->all(), request()->user());
+            $movimiento->load('animales');
 
-        return response()->json(['success' => true, 'message' => 'Movimiento actualizado', 'data' => $movimiento]);
+            return response()->json([
+                'success' => true,
+                'message' => 'Movimiento registrado exitosamente',
+                'data'    => $this->formatResource(MovimientoRebanoStoreResource::class, $movimiento),
+            ], Response::HTTP_CREATED);
+        } catch (UnprocessableEntityHttpException $e) {
+            return response()->json([
+                'success' => false,
+                'message' => $e->getMessage()
+            ], Response::HTTP_UNPROCESSABLE_ENTITY);
+        }
     }
 
+    /**
+     * Devuelve el detalle de un movimiento específico.
+     *
+     * @param int $id
+     * @return \Illuminate\Http\JsonResponse
+     */
+    public function show($id)
+    {
+        try {
+            $movimiento = $this->movimientoService->getMovimientoById((int)$id, request()->user());
+
+            return response()->json([
+                'success' => true,
+                'data'    => $this->formatResource(MovimientoRebanoShowResource::class, $movimiento)
+            ], Response::HTTP_OK);
+        } catch (ModelNotFoundException $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Movimiento no encontrado'
+            ], Response::HTTP_NOT_FOUND);
+        }
+    }
+
+    /**
+     * Actualiza los datos descriptivos de un traslado.
+     *
+     * @param Request $request
+     * @param int $id
+     * @return \Illuminate\Http\JsonResponse
+     */
+    public function update(Request $request, $id)
+    {
+        $validator = Validator::make($request->all(), [
+            'rebano_destino' => 'nullable|string|max:30',
+            'comentario'     => 'nullable|string|max:40',
+        ]);
+
+        if ($validator->fails()) {
+            return response()->json([
+                'success' => false,
+                'errors'  => $validator->errors()
+            ], Response::HTTP_UNPROCESSABLE_ENTITY);
+        }
+
+        try {
+            $movimiento = $this->movimientoService->updateMovimiento((int)$id, $request->all(), request()->user());
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Movimiento actualizado exitosamente',
+                'data'    => $this->formatResource(MovimientoRebanoIndexResource::class, $movimiento)
+            ], Response::HTTP_OK);
+        } catch (ModelNotFoundException $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Movimiento no encontrado'
+            ], Response::HTTP_NOT_FOUND);
+        }
+    }
+
+    /**
+     * Elimina un registro de traslado físico.
+     *
+     * @param int $id
+     * @return \Illuminate\Http\JsonResponse
+     */
     public function destroy($id)
     {
-        $movimiento = MovimientoRebano::find($id);
-        if (!$movimiento) {
-            return response()->json(['success' => false, 'message' => 'Movimiento no encontrado'], Response::HTTP_NOT_FOUND);
+        try {
+            $this->movimientoService->deleteMovimiento((int)$id, request()->user());
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Movimiento eliminado exitosamente'
+            ], Response::HTTP_OK);
+        } catch (ModelNotFoundException $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Movimiento no encontrado'
+            ], Response::HTTP_NOT_FOUND);
         }
-        DB::transaction(function () use ($movimiento) {
-            MovimientoRebanoAnimal::where('id_Movimiento', $movimiento->id_Movimiento)->delete();
-            $movimiento->delete();
-        });
-        return response()->json(['success' => true, 'message' => 'Movimiento eliminado']);
     }
 }

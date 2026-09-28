@@ -9,29 +9,23 @@ class EstadoSalud extends Model
 {
     use HasFactory;
 
-    protected $table = 'estado_salud';
-    protected $primaryKey = 'estado_id';
-    
-    // This table doesn't have timestamps
-    public $timestamps = false;
-
     protected $fillable = [
-        'estado_nombre',
+        'nombre',
     ];
 
     /**
-     * Get the estados animal for this estado salud.
+     * Obtener el/la estados animal for this estado salud.
      */
     public function estadosAnimal()
     {
-        return $this->hasMany(EstadoAnimal::class, 'esan_fk_estado_id', 'estado_id');
+        return $this->hasMany(EstadoAnimal::class, 'estado_salud_id', 'id');
     }
 
     /**
-     * Scope a query to search by name.
+     * Filtro para buscar por nombre.
      */
     public function scopeByName($query, $name)
     {
-        return $query->where('estado_nombre', 'like', '%' . $name . '%');
+        return $query->where('nombre', 'like', '%'.$name.'%');
     }
 }

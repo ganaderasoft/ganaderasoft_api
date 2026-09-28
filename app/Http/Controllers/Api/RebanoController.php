@@ -3,49 +3,52 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
-use App\Models\Rebano;
-use App\Models\Finca;
+use App\Http\Middleware\Legacy\Rebano\NormalizeIndex;
+use App\Http\Middleware\Legacy\Rebano\NormalizeShow;
+use App\Http\Middleware\Legacy\Rebano\NormalizeStore;
+use App\Http\Middleware\Legacy\Rebano\NormalizeUpdate;
+use App\Http\Resources\Rebano\RebanoResource;
+use App\Services\Rebano\RebanoService;
 use Illuminate\Http\Request;
 use Illuminate\Http\Response;
 use Illuminate\Support\Facades\Validator;
+use Illuminate\Auth\Access\AuthorizationException;
+use Symfony\Component\HttpKernel\Exception\ConflictHttpException;
+use Symfony\Component\HttpKernel\Exception\NotFoundHttpException;
 
 class RebanoController extends Controller
 {
+    protected $rebanoService;
+
+    public function __construct(RebanoService $rebanoService)
+    {
+        $this->rebanoService = $rebanoService;
+        
+        $this->middleware(NormalizeIndex::class)->only('index');
+        $this->middleware(NormalizeShow::class)->only('show');
+        $this->middleware(NormalizeStore::class)->only('store');
+        $this->middleware(NormalizeUpdate::class)->only('update');
+    }
+
     /**
      * Display a listing of rebanos.
      */
     public function index(Request $request)
     {
-        $user = $request->user();
-        
-        // If user is admin, show all rebanos
-        if ($user->isAdmin()) {
-            $rebanos = Rebano::with(['finca.propietario', 'animales'])
-                ->active()
-                ->paginate(15);
-        } else {
-            // If user is propietario, show only rebanos from their fincas
-            $propietario = $user->propietario;
-            if (!$propietario) {
-                return response()->json([
-                    'success' => false,
-                    'message' => 'Usuario no es propietario'
-                ], Response::HTTP_FORBIDDEN);
-            }
+        try {
+            $rebanos = $this->rebanoService->listRebanos($request->all(), $request->user());
             
-            $rebanos = Rebano::with(['finca.propietario', 'animales'])
-                ->whereHas('finca', function ($query) use ($propietario) {
-                    $query->where('id_Propietario', $propietario->id);
-                })
-                ->active()
-                ->paginate(15);
+            return response()->json([
+                'success' => true,
+                'message' => 'Lista de rebaños',
+                'data' => $this->formatCollection(RebanoResource::class, $rebanos)
+            ]);
+        } catch (AuthorizationException $e) {
+            return response()->json([
+                'success' => false,
+                'message' => $e->getMessage()
+            ], Response::HTTP_FORBIDDEN);
         }
-
-        return response()->json([
-            'success' => true,
-            'message' => 'Lista de rebaños',
-            'data' => $rebanos
-        ]);
     }
 
     /**
@@ -54,8 +57,8 @@ class RebanoController extends Controller
     public function store(Request $request)
     {
         $validator = Validator::make($request->all(), [
-            'id_Finca' => 'required|exists:finca,id_Finca',
-            'Nombre' => 'required|string|max:25'
+            'finca_id' => 'required|exists:fincas,id',
+            'nombre' => 'required|string|max:25'
         ]);
 
         if ($validator->fails()) {
@@ -66,40 +69,20 @@ class RebanoController extends Controller
             ], Response::HTTP_UNPROCESSABLE_ENTITY);
         }
 
-        $user = $request->user();
-        
-        // Check permissions: admin can create for any finca, propietario only for their fincas
-        if (!$user->isAdmin()) {
-            $propietario = $user->propietario;
-            if (!$propietario) {
-                return response()->json([
-                    'success' => false,
-                    'message' => 'Usuario no es propietario'
-                ], Response::HTTP_FORBIDDEN);
-            }
+        try {
+            $rebano = $this->rebanoService->storeRebano($request->all(), $request->user());
             
-            $finca = Finca::find($request->id_Finca);
-            if (!$finca || $finca->id_Propietario != $propietario->id) {
-                return response()->json([
-                    'success' => false,
-                    'message' => 'No tiene permisos para crear rebaño en esta finca'
-                ], Response::HTTP_FORBIDDEN);
-            }
+            return response()->json([
+                'success' => true,
+                'message' => 'Rebaño creado exitosamente',
+                'data' => $this->formatResource(RebanoResource::class, $rebano)
+            ], Response::HTTP_CREATED);
+        } catch (AuthorizationException $e) {
+            return response()->json([
+                'success' => false,
+                'message' => $e->getMessage()
+            ], Response::HTTP_FORBIDDEN);
         }
-
-        $rebano = Rebano::create([
-            'id_Finca' => $request->id_Finca,
-            'Nombre' => $request->Nombre,
-            'archivado' => false
-        ]);
-
-        $rebano->load(['finca.propietario', 'animales']);
-
-        return response()->json([
-            'success' => true,
-            'message' => 'Rebaño creado exitosamente',
-            'data' => $rebano
-        ], Response::HTTP_CREATED);
     }
 
     /**
@@ -107,33 +90,25 @@ class RebanoController extends Controller
      */
     public function show(Request $request, $id)
     {
-        $rebano = Rebano::with(['finca.propietario', 'animales'])->find($id);
-
-        if (!$rebano) {
+        try {
+            $rebano = $this->rebanoService->getRebano($id, $request->user());
+            
+            return response()->json([
+                'success' => true,
+                'message' => 'Detalle de rebaño',
+                'data' => $this->formatResource(RebanoResource::class, $rebano)
+            ]);
+        } catch (NotFoundHttpException $e) {
             return response()->json([
                 'success' => false,
-                'message' => 'Rebaño no encontrado'
+                'message' => $e->getMessage()
             ], Response::HTTP_NOT_FOUND);
+        } catch (AuthorizationException $e) {
+            return response()->json([
+                'success' => false,
+                'message' => $e->getMessage()
+            ], Response::HTTP_FORBIDDEN);
         }
-
-        $user = $request->user();
-        
-        // Check permissions: admin can see all, propietario only their own
-        if (!$user->isAdmin()) {
-            $propietario = $user->propietario;
-            if (!$propietario || $rebano->finca->id_Propietario != $propietario->id) {
-                return response()->json([
-                    'success' => false,
-                    'message' => 'No tiene permisos para ver este rebaño'
-                ], Response::HTTP_FORBIDDEN);
-            }
-        }
-
-        return response()->json([
-            'success' => true,
-            'message' => 'Detalle de rebaño',
-            'data' => $rebano
-        ]);
     }
 
     /**
@@ -141,18 +116,9 @@ class RebanoController extends Controller
      */
     public function update(Request $request, $id)
     {
-        $rebano = Rebano::find($id);
-
-        if (!$rebano) {
-            return response()->json([
-                'success' => false,
-                'message' => 'Rebaño no encontrado'
-            ], Response::HTTP_NOT_FOUND);
-        }
-
         $validator = Validator::make($request->all(), [
-            'Nombre' => 'sometimes|string|max:25',
-            'id_Finca' => 'sometimes|exists:finca,id_Finca'
+            'nombre' => 'sometimes|string|max:25',
+            'finca_id' => 'sometimes|exists:fincas,id'
         ]);
 
         if ($validator->fails()) {
@@ -163,81 +129,106 @@ class RebanoController extends Controller
             ], Response::HTTP_UNPROCESSABLE_ENTITY);
         }
 
-        $user = $request->user();
-        
-        // Check permissions: admin can update all, propietario only their own
-        if (!$user->isAdmin()) {
-            $propietario = $user->propietario;
-            if (!$propietario || $rebano->finca->id_Propietario != $propietario->id) {
-                return response()->json([
-                    'success' => false,
-                    'message' => 'No tiene permisos para actualizar este rebaño'
-                ], Response::HTTP_FORBIDDEN);
-            }
+        try {
+            $rebano = $this->rebanoService->updateRebano($id, $request->all(), $request->user());
             
-            // If changing finca, check permissions on new finca
-            if ($request->has('id_Finca')) {
-                $newFinca = Finca::find($request->id_Finca);
-                if (!$newFinca || $newFinca->id_Propietario != $propietario->id) {
-                    return response()->json([
-                        'success' => false,
-                        'message' => 'No tiene permisos para mover el rebaño a esa finca'
-                    ], Response::HTTP_FORBIDDEN);
-                }
-            }
+            return response()->json([
+                'success' => true,
+                'message' => 'Rebaño actualizado exitosamente',
+                'data' => $this->formatResource(RebanoResource::class, $rebano)
+            ]);
+        } catch (NotFoundHttpException $e) {
+            return response()->json([
+                'success' => false,
+                'message' => $e->getMessage()
+            ], Response::HTTP_NOT_FOUND);
+        } catch (AuthorizationException $e) {
+            return response()->json([
+                'success' => false,
+                'message' => $e->getMessage()
+            ], Response::HTTP_FORBIDDEN);
         }
-
-        $rebano->update($request->only(['Nombre', 'id_Finca']));
-        $rebano->load(['finca.propietario', 'animales']);
-
-        return response()->json([
-            'success' => true,
-            'message' => 'Rebaño actualizado exitosamente',
-            'data' => $rebano
-        ]);
     }
 
     /**
-     * Remove the specified rebano (soft delete).
+     * Remove the specified rebano (hard delete).
      */
     public function destroy(Request $request, $id)
     {
-        $rebano = Rebano::find($id);
-
-        if (!$rebano) {
+        try {
+            $this->rebanoService->deleteRebano((int) $id, $request->user());
+            
+            return response()->json([
+                'success' => true,
+                'message' => 'Rebaño eliminado exitosamente'
+            ]);
+        } catch (NotFoundHttpException $e) {
             return response()->json([
                 'success' => false,
-                'message' => 'Rebaño no encontrado'
+                'message' => $e->getMessage()
             ], Response::HTTP_NOT_FOUND);
-        }
-
-        $user = $request->user();
-        
-        // Check permissions: admin can delete all, propietario only their own
-        if (!$user->isAdmin()) {
-            $propietario = $user->propietario;
-            if (!$propietario || $rebano->finca->id_Propietario != $propietario->id) {
-                return response()->json([
-                    'success' => false,
-                    'message' => 'No tiene permisos para eliminar este rebaño'
-                ], Response::HTTP_FORBIDDEN);
-            }
-        }
-
-        // Check if rebano has animals
-        if ($rebano->animales()->count() > 0) {
+        } catch (AuthorizationException $e) {
             return response()->json([
                 'success' => false,
-                'message' => 'No se puede eliminar el rebaño, tiene animales asociados'
+                'message' => $e->getMessage()
+            ], Response::HTTP_FORBIDDEN);
+        } catch (ConflictHttpException $e) {
+            return response()->json([
+                'success' => false,
+                'message' => $e->getMessage()
             ], Response::HTTP_CONFLICT);
         }
+    }
 
-        // Soft delete by setting archivado = true
-        $rebano->update(['archivado' => true]);
+    /**
+     * Archivar un rebaño específico.
+     */
+    public function archive(Request $request, $id)
+    {
+        try {
+            $rebano = $this->rebanoService->archiveRebano((int) $id, $request->user());
+            
+            return response()->json([
+                'success' => true,
+                'message' => 'Rebaño archivado exitosamente',
+                'data' => $this->formatResource(RebanoResource::class, $rebano)
+            ]);
+        } catch (NotFoundHttpException $e) {
+            return response()->json([
+                'success' => false,
+                'message' => $e->getMessage()
+            ], Response::HTTP_NOT_FOUND);
+        } catch (AuthorizationException $e) {
+            return response()->json([
+                'success' => false,
+                'message' => $e->getMessage()
+            ], Response::HTTP_FORBIDDEN);
+        }
+    }
 
-        return response()->json([
-            'success' => true,
-            'message' => 'Rebaño eliminado exitosamente'
-        ]);
+    /**
+     * Desarchivar un rebaño específico.
+     */
+    public function unarchive(Request $request, $id)
+    {
+        try {
+            $rebano = $this->rebanoService->unarchiveRebano((int) $id, $request->user());
+            
+            return response()->json([
+                'success' => true,
+                'message' => 'Rebaño desarchivado exitosamente',
+                'data' => $this->formatResource(RebanoResource::class, $rebano)
+            ]);
+        } catch (NotFoundHttpException $e) {
+            return response()->json([
+                'success' => false,
+                'message' => $e->getMessage()
+            ], Response::HTTP_NOT_FOUND);
+        } catch (AuthorizationException $e) {
+            return response()->json([
+                'success' => false,
+                'message' => $e->getMessage()
+            ], Response::HTTP_FORBIDDEN);
+        }
     }
 }

@@ -3,47 +3,54 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
+use App\Services\Persona\PropietarioService;
+use App\Http\Resources\Persona\PropietarioResource;
+use App\Http\Middleware\Legacy\Propietario\NormalizeIndex;
+use App\Http\Middleware\Legacy\Propietario\NormalizeStore;
+use App\Http\Middleware\Legacy\Propietario\NormalizeShow;
+use App\Http\Middleware\Legacy\Propietario\NormalizeUpdate;
 use App\Models\Propietario;
-use App\Models\User;
 use Illuminate\Http\Request;
 use Illuminate\Http\Response;
 use Illuminate\Support\Facades\Validator;
+use Illuminate\Auth\Access\AuthorizationException;
+use Illuminate\Database\Eloquent\ModelNotFoundException;
+use Symfony\Component\HttpKernel\Exception\ConflictHttpException;
 
 class PropietarioController extends Controller
 {
+    /**
+     * Constructor del controlador.
+     * Inyecta el servicio de Propietario y registra los middlewares de compatibilidad legacy.
+     */
+    public function __construct(
+        private PropietarioService $propietarioService
+    ) {
+        $this->middleware(NormalizeIndex::class)->only('index');
+        $this->middleware(NormalizeStore::class)->only('store');
+        $this->middleware(NormalizeShow::class)->only('show');
+        $this->middleware(NormalizeUpdate::class)->only('update');
+    }
+
     /**
      * Display a listing of propietarios.
      */
     public function index(Request $request)
     {
-        $user = $request->user();
-        
-        // If user is admin, show all propietarios
-        if ($user->isAdmin()) {
-            $propietarios = Propietario::with(['user', 'fincas'])
-                ->active()
-                ->paginate(15);
-        } else {
-            // If user is propietario, show only their own record
-            $propietario = $user->propietario;
-            if (!$propietario) {
-                return response()->json([
-                    'success' => false,
-                    'message' => 'Usuario no es propietario'
-                ], Response::HTTP_FORBIDDEN);
-            }
-            
-            $propietarios = Propietario::with(['user', 'fincas'])
-                ->where('id', $propietario->id)
-                ->active()
-                ->paginate(15);
-        }
+        try {
+            $propietarios = $this->propietarioService->listPropietarios($request->all(), $request->user());
 
-        return response()->json([
-            'success' => true,
-            'message' => 'Lista de propietarios',
-            'data' => $propietarios
-        ]);
+            return response()->json([
+                'success' => true,
+                'message' => 'Lista de propietarios',
+                'data' => $this->formatCollection(PropietarioResource::class, $propietarios)
+            ]);
+        } catch (AuthorizationException $e) {
+            return response()->json([
+                'success' => false,
+                'message' => $e->getMessage()
+            ], Response::HTTP_FORBIDDEN);
+        }
     }
 
     /**
@@ -52,11 +59,12 @@ class PropietarioController extends Controller
     public function store(Request $request)
     {
         $validator = Validator::make($request->all(), [
-            'id' => 'required|exists:users,id',
-            'Nombre' => 'required|string|max:255',
-            'Apellido' => 'required|string|max:255',
-            'Telefono' => 'nullable|string|max:20',
-            'id_Personal' => 'nullable|integer'
+            'user_id' => 'required|exists:users,id',
+            'nombre' => 'required|string|max:255',
+            'apellido' => 'required|string|max:255',
+            'telefono' => 'nullable|string|max:20',
+            'cedula' => ['required', 'string', 'unique:personas,cedula', 'regex:/^[VGEJ][0-9]+$/'],
+            'correo' => 'nullable|email|unique:personas,correo',
         ]);
 
         if ($validator->fails()) {
@@ -67,41 +75,25 @@ class PropietarioController extends Controller
             ], Response::HTTP_UNPROCESSABLE_ENTITY);
         }
 
-        $user = $request->user();
-        
-        // Only admin can create propietarios for other users
-        if (!$user->isAdmin() && $request->id != $user->id) {
-            return response()->json([
-                'success' => false,
-                'message' => 'No tiene permisos para crear propietario para otro usuario'
-            ], Response::HTTP_FORBIDDEN);
-        }
+        try {
+            $propietario = $this->propietarioService->storePropietario($request->all(), $request->user());
 
-        // Check if propietario already exists for this user
-        $existingPropietario = Propietario::where('id', $request->id)->first();
-        if ($existingPropietario) {
+            return response()->json([
+                'success' => true,
+                'message' => 'Propietario creado exitosamente',
+                'data' => $this->formatResource(PropietarioResource::class, $propietario)
+            ], Response::HTTP_CREATED);
+        } catch (AuthorizationException $e) {
             return response()->json([
                 'success' => false,
-                'message' => 'Ya existe un propietario para este usuario'
+                'message' => $e->getMessage()
+            ], Response::HTTP_FORBIDDEN);
+        } catch (ConflictHttpException $e) {
+            return response()->json([
+                'success' => false,
+                'message' => $e->getMessage()
             ], Response::HTTP_CONFLICT);
         }
-
-        $propietario = Propietario::create([
-            'id' => $request->id,
-            'id_Personal' => $request->id_Personal,
-            'Nombre' => $request->Nombre,
-            'Apellido' => $request->Apellido,
-            'Telefono' => $request->Telefono,
-            'archivado' => false
-        ]);
-
-        $propietario->load(['user', 'fincas']);
-
-        return response()->json([
-            'success' => true,
-            'message' => 'Propietario creado exitosamente',
-            'data' => $propietario
-        ], Response::HTTP_CREATED);
     }
 
     /**
@@ -109,30 +101,25 @@ class PropietarioController extends Controller
      */
     public function show(Request $request, $id)
     {
-        $propietario = Propietario::with(['user', 'fincas'])->find($id);
+        try {
+            $propietario = $this->propietarioService->getPropietario((int) $id, $request->user());
 
-        if (!$propietario) {
+            return response()->json([
+                'success' => true,
+                'message' => 'Detalle de propietario',
+                'data' => $this->formatResource(PropietarioResource::class, $propietario)
+            ]);
+        } catch (ModelNotFoundException $e) {
             return response()->json([
                 'success' => false,
                 'message' => 'Propietario no encontrado'
             ], Response::HTTP_NOT_FOUND);
-        }
-
-        $user = $request->user();
-        
-        // Check permissions: admin can see all, propietario only their own
-        if (!$user->isAdmin() && $user->id != $propietario->id) {
+        } catch (AuthorizationException $e) {
             return response()->json([
                 'success' => false,
-                'message' => 'No tiene permisos para ver este propietario'
+                'message' => $e->getMessage()
             ], Response::HTTP_FORBIDDEN);
         }
-
-        return response()->json([
-            'success' => true,
-            'message' => 'Detalle de propietario',
-            'data' => $propietario
-        ]);
     }
 
     /**
@@ -140,9 +127,10 @@ class PropietarioController extends Controller
      */
     public function update(Request $request, $id)
     {
-        $propietario = Propietario::find($id);
-
-        if (!$propietario) {
+        try {
+            $propietario = Propietario::findOrFail((int) $id);
+            $personaId = $propietario->persona_id;
+        } catch (ModelNotFoundException $e) {
             return response()->json([
                 'success' => false,
                 'message' => 'Propietario no encontrado'
@@ -150,10 +138,11 @@ class PropietarioController extends Controller
         }
 
         $validator = Validator::make($request->all(), [
-            'Nombre' => 'sometimes|string|max:255',
-            'Apellido' => 'sometimes|string|max:255',
-            'Telefono' => 'nullable|string|max:20',
-            'id_Personal' => 'nullable|integer'
+            'nombre' => 'sometimes|string|max:255',
+            'apellido' => 'sometimes|string|max:255',
+            'telefono' => 'nullable|string|max:20',
+            'cedula' => ['sometimes', 'string', 'unique:personas,cedula,' . $personaId . ',id', 'regex:/^[VGEJ][0-9]+$/'],
+            'correo' => 'nullable|email|unique:personas,correo,' . $personaId . ',id',
         ]);
 
         if ($validator->fails()) {
@@ -164,24 +153,20 @@ class PropietarioController extends Controller
             ], Response::HTTP_UNPROCESSABLE_ENTITY);
         }
 
-        $user = $request->user();
-        
-        // Check permissions: admin can update all, propietario only their own
-        if (!$user->isAdmin() && $user->id != $propietario->id) {
+        try {
+            $propietario = $this->propietarioService->updatePropietario((int) $id, $request->all(), $request->user());
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Propietario actualizado exitosamente',
+                'data' => $this->formatResource(PropietarioResource::class, $propietario)
+            ]);
+        } catch (AuthorizationException $e) {
             return response()->json([
                 'success' => false,
-                'message' => 'No tiene permisos para actualizar este propietario'
+                'message' => $e->getMessage()
             ], Response::HTTP_FORBIDDEN);
         }
-
-        $propietario->update($request->only(['Nombre', 'Apellido', 'Telefono', 'id_Personal']));
-        $propietario->load(['user', 'fincas']);
-
-        return response()->json([
-            'success' => true,
-            'message' => 'Propietario actualizado exitosamente',
-            'data' => $propietario
-        ]);
     }
 
     /**
@@ -189,31 +174,23 @@ class PropietarioController extends Controller
      */
     public function destroy(Request $request, $id)
     {
-        $propietario = Propietario::find($id);
+        try {
+            $this->propietarioService->archivePropietario((int) $id, $request->user());
 
-        if (!$propietario) {
+            return response()->json([
+                'success' => true,
+                'message' => 'Propietario eliminado exitosamente'
+            ]);
+        } catch (ModelNotFoundException $e) {
             return response()->json([
                 'success' => false,
                 'message' => 'Propietario no encontrado'
             ], Response::HTTP_NOT_FOUND);
-        }
-
-        $user = $request->user();
-        
-        // Only admin can delete propietarios
-        if (!$user->isAdmin()) {
+        } catch (AuthorizationException $e) {
             return response()->json([
                 'success' => false,
-                'message' => 'No tiene permisos para eliminar propietarios'
+                'message' => $e->getMessage()
             ], Response::HTTP_FORBIDDEN);
         }
-
-        // Soft delete by setting archivado = true
-        $propietario->update(['archivado' => true]);
-
-        return response()->json([
-            'success' => true,
-            'message' => 'Propietario eliminado exitosamente'
-        ]);
     }
 }

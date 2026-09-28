@@ -9,57 +9,99 @@ class Vacunacion extends Model
 {
     use HasFactory;
 
-    protected $table = 'vacunacion';
-    protected $primaryKey = 'vacunacion_id';
+    /**
+     * Nombre de la tabla en la base de datos según estándar pivote / Many-to-Many.
+     */
+    protected $table = 'animal_vacuna';
 
     protected $fillable = [
-        'vacunacion_vacuna_id',
-        'vacunacion_casa_id',
-        'vacunacion_rebano_id',
-        'vacunacion_modo_seleccion',
-        'vacunacion_filtros',
-        'vacunacion_fecha',
-        'vacunacion_costo_dosis',
-        'vacunacion_total_animales',
-        'vacunacion_monto_total',
-        'vacunacion_observacion',
+        'animal_id',
+        'vacuna_id',
+        'persona_id',
+        'fecha',
+        'dosis',
+        'costo',
+        'lote',
+        'observacion',
     ];
 
     protected $casts = [
-        'vacunacion_filtros' => 'array',
-        'vacunacion_fecha' => 'date',
-        'vacunacion_costo_dosis' => 'float',
-        'vacunacion_total_animales' => 'integer',
-        'vacunacion_monto_total' => 'float',
+        'fecha' => 'date',
+        'dosis' => 'decimal:2',
+        'costo' => 'decimal:2',
     ];
 
+    /**
+     * Animal al que se le aplicó la vacuna.
+     */
+    public function animal()
+    {
+        return $this->belongsTo(Animal::class, 'animal_id', 'id');
+    }
+
+    /**
+     * Vacuna aplicada.
+     */
     public function vacuna()
     {
-        return $this->belongsTo(Vacuna::class, 'vacunacion_vacuna_id', 'vacuna_id');
+        return $this->belongsTo(Vacuna::class, 'vacuna_id', 'id');
     }
 
-    public function casaComercial()
+    /**
+     * Persona que aplicó la vacuna (propietario, veterinario o trabajador de finca).
+     */
+    public function aplicador()
     {
-        return $this->belongsTo(CasaComercial::class, 'vacunacion_casa_id', 'casa_id');
+        return $this->belongsTo(Persona::class, 'persona_id', 'id');
     }
 
-    public function rebano()
+    /**
+     * Scope para filtrar por animal.
+     */
+    public function scopeForAnimal($query, $animalId)
     {
-        return $this->belongsTo(Rebano::class, 'vacunacion_rebano_id', 'id_Rebano');
+        return $query->where('animal_id', $animalId);
     }
 
-    public function animales()
-    {
-        return $this->hasMany(VacunacionAnimal::class, 'va_vacunacion_id', 'vacunacion_id');
-    }
-
+    /**
+     * Scope para filtrar por vacuna.
+     */
     public function scopeForVacuna($query, $vacunaId)
     {
-        return $query->where('vacunacion_vacuna_id', $vacunaId);
+        return $query->where('vacuna_id', $vacunaId);
     }
 
+    /**
+     * Scope para filtrar por rango de fechas.
+     */
+    public function scopeBetweenDates($query, $from, $to)
+    {
+        if ($from) {
+            $query->where('fecha', '>=', $from);
+        }
+        if ($to) {
+            $query->where('fecha', '<=', $to);
+        }
+        return $query;
+    }
+
+    /**
+     * Scope para filtrar por finca (a través del animal -> rebaño -> finca).
+     */
+    public function scopeForFinca($query, $fincaId)
+    {
+        return $query->whereHas('animal.rebano', function ($q) use ($fincaId) {
+            $q->where('finca_id', $fincaId);
+        });
+    }
+
+    /**
+     * Scope para filtrar por rebaño (a través del animal).
+     */
     public function scopeForRebano($query, $rebanoId)
     {
-        return $query->where('vacunacion_rebano_id', $rebanoId);
+        return $query->whereHas('animal', function ($q) use ($rebanoId) {
+            $q->where('rebano_id', $rebanoId);
+        });
     }
 }

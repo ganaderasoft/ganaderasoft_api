@@ -3,95 +3,130 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
-use App\Models\Vacuna;
+use App\Http\Resources\Sanidad\VacunaResource;
+use App\Http\Middleware\Legacy\Sanidad\NormalizeIndexVacuna;
+use App\Http\Middleware\Legacy\Sanidad\NormalizeShowVacuna;
+use App\Http\Middleware\Legacy\Sanidad\NormalizeStoreVacuna;
+use App\Http\Middleware\Legacy\Sanidad\NormalizeUpdateVacuna;
+use App\Services\Sanidad\VacunaService;
 use Illuminate\Http\Request;
 use Illuminate\Http\Response;
 use Illuminate\Support\Facades\Validator;
+use Illuminate\Database\Eloquent\ModelNotFoundException;
 
 class VacunaController extends Controller
 {
+    public function __construct(
+        protected VacunaService $vacunaService
+    ) {
+        $this->middleware(NormalizeIndexVacuna::class)->only('index');
+        $this->middleware(NormalizeShowVacuna::class)->only('show');
+        $this->middleware(NormalizeStoreVacuna::class)->only('store');
+        $this->middleware(NormalizeUpdateVacuna::class)->only('update');
+    }
+
     public function index(Request $request)
     {
-        $query = Vacuna::with('casasComerciales');
-
-        if ($request->has('nombre')) {
-            $query->byNombre($request->nombre);
-        }
-
-        if ($request->filled('activa')) {
-            $query->where('activa', filter_var($request->activa, FILTER_VALIDATE_BOOLEAN));
-        }
-
-        $records = $query->paginate(15);
+        $filters = $request->only(['nombre', 'activa', 'nopaginate']);
+        
+        $records = $this->vacunaService->getPaginatedVacunas($filters, request()->user());
 
         return response()->json([
-            'success'    => true,
-            'message'    => 'Catálogo de vacunas',
-            'data'       => $records->items(),
-            'pagination' => [
-                'current_page' => $records->currentPage(),
-                'last_page'    => $records->lastPage(),
-                'per_page'     => $records->perPage(),
-                'total'        => $records->total(),
-            ],
-        ]);
+            'success' => true,
+            'message' => 'Catálogo de vacunas',
+            'data'    => $this->formatCollection(VacunaResource::class, $records),
+        ], Response::HTTP_OK);
     }
 
     public function store(Request $request)
     {
         $validator = Validator::make($request->all(), [
-            'vacuna_nombre' => 'required|string|max:80',
-            'vacuna_descripcion' => 'nullable|string',
-            'activa' => 'nullable|boolean',
+            'nombre'      => 'required|string|max:80',
+            'descripcion' => 'nullable|string',
+            'activa'      => 'nullable|boolean',
         ]);
 
         if ($validator->fails()) {
-            return response()->json(['success' => false, 'errors' => $validator->errors()], Response::HTTP_UNPROCESSABLE_ENTITY);
+            return response()->json([
+                'success' => false, 
+                'message' => 'Datos de validación incorrectos',
+                'errors'  => $validator->errors()
+            ], Response::HTTP_UNPROCESSABLE_ENTITY);
         }
 
-        $vacuna = Vacuna::create($request->only(['vacuna_nombre', 'vacuna_descripcion', 'activa']));
+        $vacuna = $this->vacunaService->createVacuna($request->all(), request()->user());
 
-        return response()->json(['success' => true, 'message' => 'Vacuna creada', 'data' => $vacuna], Response::HTTP_CREATED);
+        return response()->json([
+            'success' => true,
+            'message' => 'Vacuna creada exitosamente',
+            'data'    => $this->formatResource(VacunaResource::class, $vacuna),
+        ], Response::HTTP_CREATED);
     }
 
     public function show($id)
     {
-        $vacuna = Vacuna::with('casasComerciales', 'dosis')->find($id);
-        if (!$vacuna) {
-            return response()->json(['success' => false, 'message' => 'Vacuna no encontrada'], Response::HTTP_NOT_FOUND);
+        try {
+            $vacuna = $this->vacunaService->getVacunaById((int)$id, request()->user());
+
+            return response()->json([
+                'success' => true, 
+                'message' => 'Vacuna obtenida exitosamente',
+                'data'    => $this->formatResource(VacunaResource::class, $vacuna)
+            ], Response::HTTP_OK);
+        } catch (ModelNotFoundException $e) {
+            return response()->json([
+                'success' => false, 
+                'message' => 'Vacuna no encontrada'
+            ], Response::HTTP_NOT_FOUND);
         }
-        return response()->json(['success' => true, 'data' => $vacuna]);
     }
 
     public function update(Request $request, $id)
     {
-        $vacuna = Vacuna::find($id);
-        if (!$vacuna) {
-            return response()->json(['success' => false, 'message' => 'Vacuna no encontrada'], Response::HTTP_NOT_FOUND);
-        }
-
         $validator = Validator::make($request->all(), [
-            'vacuna_nombre' => 'sometimes|string|max:80',
-            'vacuna_descripcion' => 'nullable|string',
-            'activa' => 'nullable|boolean',
+            'nombre'      => 'sometimes|string|max:80',
+            'descripcion' => 'nullable|string',
+            'activa'      => 'nullable|boolean',
         ]);
 
         if ($validator->fails()) {
-            return response()->json(['success' => false, 'errors' => $validator->errors()], Response::HTTP_UNPROCESSABLE_ENTITY);
+            return response()->json([
+                'success' => false, 
+                'message' => 'Datos de validación incorrectos',
+                'errors'  => $validator->errors()
+            ], Response::HTTP_UNPROCESSABLE_ENTITY);
         }
 
-        $vacuna->update($request->only(['vacuna_nombre', 'vacuna_descripcion', 'activa']));
+        try {
+            $vacuna = $this->vacunaService->updateVacuna((int)$id, $request->all(), request()->user());
 
-        return response()->json(['success' => true, 'message' => 'Vacuna actualizada', 'data' => $vacuna]);
+            return response()->json([
+                'success' => true,
+                'message' => 'Vacuna actualizada exitosamente',
+                'data'    => $this->formatResource(VacunaResource::class, $vacuna),
+            ], Response::HTTP_OK);
+        } catch (ModelNotFoundException $e) {
+            return response()->json([
+                'success' => false, 
+                'message' => 'Vacuna no encontrada'
+            ], Response::HTTP_NOT_FOUND);
+        }
     }
 
     public function destroy($id)
     {
-        $vacuna = Vacuna::find($id);
-        if (!$vacuna) {
-            return response()->json(['success' => false, 'message' => 'Vacuna no encontrada'], Response::HTTP_NOT_FOUND);
+        try {
+            $this->vacunaService->deleteVacuna((int)$id, request()->user());
+
+            return response()->json([
+                'success' => true, 
+                'message' => 'Vacuna eliminada exitosamente'
+            ], Response::HTTP_OK);
+        } catch (ModelNotFoundException $e) {
+            return response()->json([
+                'success' => false, 
+                'message' => 'Vacuna no encontrada'
+            ], Response::HTTP_NOT_FOUND);
         }
-        $vacuna->delete();
-        return response()->json(['success' => true, 'message' => 'Vacuna eliminada']);
     }
 }

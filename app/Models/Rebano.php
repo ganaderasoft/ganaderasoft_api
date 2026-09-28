@@ -9,12 +9,9 @@ class Rebano extends Model
 {
     use HasFactory;
 
-    protected $table = 'rebano';
-    protected $primaryKey = 'id_Rebano';
-
     protected $fillable = [
-        'id_Finca',
-        'Nombre',
+        'finca_id',
+        'nombre',
         'archivado',
     ];
 
@@ -23,23 +20,23 @@ class Rebano extends Model
     ];
 
     /**
-     * Get the finca that owns the rebano.
+     * Obtener el/la finca que posee este/a rebano.
      */
     public function finca()
     {
-        return $this->belongsTo(Finca::class, 'id_Finca', 'id_Finca');
+        return $this->belongsTo(Finca::class, 'finca_id', 'id');
     }
 
     /**
-     * Get the animals for the rebano.
+     * Obtener el/la animals para este/a rebano.
      */
     public function animales()
     {
-        return $this->hasMany(Animal::class, 'id_Rebano', 'id_Rebano');
+        return $this->hasMany(Animal::class, 'rebano_id', 'id');
     }
 
     /**
-     * Scope a query to only include active rebanos.
+     * Filtro para incluir solo rebanos activos/as.
      */
     public function scopeActive($query)
     {
@@ -47,10 +44,10 @@ class Rebano extends Model
     }
 
     /**
-     * Scope a query to only include rebanos of a specific finca.
+     * Filtro para incluir rebanos de un/a finca específico/a.
      */
     public function scopeForFinca($query, $fincaId)
     {
-        return $query->where('id_Finca', $fincaId);
+        return $query->where('finca_id', $fincaId);
     }
 }

@@ -9,51 +9,64 @@ class PersonalFinca extends Model
 {
     use HasFactory;
 
-    protected $table = 'personal_finca';
-    protected $primaryKey = 'id_Tecnico';
+    protected $table = 'personal_fincas';
 
     protected $fillable = [
-        'id_Finca',
-        'Cedula',
-        'Nombre',
-        'Apellido',
-        'Telefono',
-        'Correo',
-        'Tipo_Trabajador',
+        'finca_id',
+        'persona_id',
+        'tipo_trabajador_id',
+        'status',
+        'fecha_ingreso',
     ];
 
     /**
-     * Get the finca that the personal belongs to.
+     * Obtener la finca a la que pertenece el personal.
      */
     public function finca()
     {
-        return $this->belongsTo(Finca::class, 'id_Finca', 'id_Finca');
+        return $this->belongsTo(Finca::class, 'finca_id', 'id');
     }
 
     /**
-     * Scope a query to only include personal of a specific finca.
+     * Obtener la persona asociada a este personal de finca.
+     */
+    public function persona()
+    {
+        return $this->belongsTo(Persona::class, 'persona_id', 'id');
+    }
+
+    /**
+     * Obtener el tipo de trabajador asociado a este personal de finca.
+     */
+    public function tipoTrabajador()
+    {
+        return $this->belongsTo(TipoTrabajador::class, 'tipo_trabajador_id', 'id');
+    }
+
+    /**
+     * Filtro para incluir personal de una finca específica.
      */
     public function scopeForFinca($query, $fincaId)
     {
-        return $query->where('id_Finca', $fincaId);
+        return $query->where('finca_id', $fincaId);
     }
 
     /**
-     * Scope a query to filter by worker type.
+     * Filtro para buscar por tipo de trabajador.
      */
-    public function scopeByTipoTrabajador($query, $tipo)
+    public function scopeByTipoTrabajador($query, $tipoTrabajadorId)
     {
-        return $query->where('Tipo_Trabajador', $tipo);
+        return $query->where('tipo_trabajador_id', $tipoTrabajadorId);
     }
 
     /**
-     * Scope a query to search by name or surname.
+     * Filtro para buscar por nombre o apellido de la persona asociada.
      */
     public function scopeByName($query, $name)
     {
-        return $query->where(function($q) use ($name) {
-            $q->where('Nombre', 'like', "%{$name}%")
-              ->orWhere('Apellido', 'like', "%{$name}%");
+        return $query->whereHas('persona', function ($q) use ($name) {
+            $q->where('nombre', 'like', "%%{$name}%%")
+                ->orWhere('apellido', 'like', "%%{$name}%%");
         });
     }
 }

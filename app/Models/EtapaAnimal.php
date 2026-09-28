@@ -9,69 +9,64 @@ class EtapaAnimal extends Model
 {
     use HasFactory;
 
-    protected $table = 'etapa_animal';
-    
-    // Composite primary key
-    protected $primaryKey = ['etan_animal_id', 'etan_etapa_id'];
-    public $incrementing = false;
-    
-    // This table doesn't have timestamps based on the SQL structure
-    public $timestamps = false;
+    protected $table = 'animal_etapa';
+
+    // Clave primaria compuesta
 
     protected $fillable = [
-        'etan_animal_id',
-        'etan_etapa_id',
-        'etan_fecha_ini',
-        'etan_fecha_fin',
+        'animal_id',
+        'etapa_id',
+        'fecha_ini',
+        'fecha_fin',
     ];
 
     protected $casts = [
-        'etan_fecha_ini' => 'date',
-        'etan_fecha_fin' => 'date',
+        'fecha_ini' => 'date',
+        'fecha_fin' => 'date',
     ];
 
     /**
-     * Get the animal for this etapa animal.
+     * Obtener el/la animal for this etapa animal.
      */
     public function animal()
     {
-        return $this->belongsTo(Animal::class, 'etan_animal_id', 'id_Animal');
+        return $this->belongsTo(Animal::class, 'animal_id', 'id');
     }
 
     /**
-     * Get the etapa for this etapa animal.
+     * Obtener el/la etapa for this etapa animal.
      */
     public function etapa()
     {
-        return $this->belongsTo(Etapa::class, 'etan_etapa_id', 'etapa_id');
+        return $this->belongsTo(Etapa::class, 'etapa_id', 'id');
     }
 
     /**
-     * Scope a query to only include active etapas (no end date).
+     * Filtro para incluir solo etapas (no end date) activos/as.
      */
     public function scopeActive($query)
     {
-        return $query->whereNull('etan_fecha_fin');
+        return $query->whereNull('fecha_fin');
     }
 
     /**
-     * Scope a query to only include etapas for a specific animal.
+     * Filtro para incluir solo etapas for a specific animal.
      */
     public function scopeForAnimal($query, $animalId)
     {
-        return $query->where('etan_animal_id', $animalId);
+        return $query->where('animal_id', $animalId);
     }
 
     /**
-     * Scope a query to filter by etapa.
+     * Filtro para filtrar por etapa.
      */
     public function scopeByEtapa($query, $etapaId)
     {
-        return $query->where('etan_etapa_id', $etapaId);
+        return $query->where('etapa_id', $etapaId);
     }
 
     /**
-     * Check if the etapa is currently active.
+     * Verificar si la etapa está activa actualmente.
      */
     public function isActive()
     {
@@ -79,7 +74,7 @@ class EtapaAnimal extends Model
     }
 
     /**
-     * Override the getKeyName method for composite keys.
+     * Sobrescribir el método getKeyName para claves compuestas.
      */
     public function getKeyName()
     {
@@ -87,12 +82,12 @@ class EtapaAnimal extends Model
     }
 
     /**
-     * Set the keys for a save update query.
+     * Configurar las claves para una consulta de actualización de guardado.
      */
     protected function setKeysForSaveQuery($query)
     {
         $keys = $this->getKeyName();
-        if (!is_array($keys)) {
+        if (! is_array($keys)) {
             return parent::setKeysForSaveQuery($query);
         }
 
@@ -104,7 +99,7 @@ class EtapaAnimal extends Model
     }
 
     /**
-     * Get the primary key value for a save query.
+     * Obtener el valor de la clave primaria para una consulta de guardado.
      */
     protected function getKeyForSaveQuery($keyName = null)
     {

@@ -4,7 +4,12 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Models\Animal;
-use App\Models\ArbolGen;
+use App\Services\Animal\ArbolGenService;
+use App\Http\Resources\Animal\ArbolGenResource;
+use App\Http\Resources\Animal\AnimalResource;
+use App\Http\Middleware\Legacy\Animal\ArbolGen\NormalizeGetTree;
+use App\Http\Middleware\Legacy\Animal\ArbolGen\NormalizeSetParent;
+use App\Http\Middleware\Legacy\Animal\ArbolGen\NormalizeGetAvailableParents;
 use Illuminate\Http\Request;
 use Illuminate\Http\Response;
 use Illuminate\Support\Facades\Validator;
@@ -12,182 +17,113 @@ use Illuminate\Support\Facades\Validator;
 class ArbolGenController extends Controller
 {
     /**
-     * Devuelve el árbol genealógico completo de un animal (3 generaciones):
-     * abuelos paternos/maternos → padre/madre → animal → hijos directos.
+     * Constructor del controlador.
+     * Inyecta los servicios y registra los middlewares de normalización legacy.
      */
-    public function arbol(Animal $animal)
+    public function __construct(
+        protected ArbolGenService $arbolGenService
+    ) {
+        $this->middleware(NormalizeGetTree::class)->only('getTree');
+        $this->middleware(NormalizeSetParent::class)->only('setParent');
+        $this->middleware(NormalizeGetAvailableParents::class)->only('getAvailableParents');
+    }
+
+    /**
+     * Devuelve el árbol genealógico completo de un animal (3 generaciones).
+     */
+    public function getTree(Request $request, Animal $animal)
     {
-        $animal->load([
-            'registroPadre.progenitor.registroPadre.progenitor',
-            'registroPadre.progenitor.registroMadre.progenitor',
-            'registroMadre.progenitor.registroPadre.progenitor',
-            'registroMadre.progenitor.registroMadre.progenitor',
-            'hijos.hijo',
-        ]);
-
-        $padre = optional($animal->registroPadre)->progenitor;
-        $madre = optional($animal->registroMadre)->progenitor;
-
-        $abueloPaterno  = $padre ? optional($padre->registroPadre)->progenitor : null;
-        $abuelaPaterna  = $padre ? optional($padre->registroMadre)->progenitor : null;
-        $abueloMaterno  = $madre ? optional($madre->registroPadre)->progenitor : null;
-        $abuelaMaterna  = $madre ? optional($madre->registroMadre)->progenitor : null;
-
-        $data = [
-            'animal' => $this->animalBasic($animal),
-            'padre'  => $padre ? array_merge($this->animalBasic($padre), [
-                'abuelo_paterno' => $abueloPaterno ? $this->animalBasic($abueloPaterno) : null,
-                'abuela_paterna' => $abuelaPaterna ? $this->animalBasic($abuelaPaterna) : null,
-            ]) : null,
-            'madre'  => $madre ? array_merge($this->animalBasic($madre), [
-                'abuelo_materno' => $abueloMaterno ? $this->animalBasic($abueloMaterno) : null,
-                'abuela_materna' => $abuelaMaterna ? $this->animalBasic($abuelaMaterna) : null,
-            ]) : null,
-            'hijos'  => $animal->hijos->map(function ($rel) {
-                return $rel->hijo ? $this->animalBasic($rel->hijo) : null;
-            })->filter()->values(),
-            'relaciones' => [
-                'id_arbol_padre' => optional($animal->registroPadre)->id_arbol,
-                'id_arbol_madre' => optional($animal->registroMadre)->id_arbol,
-            ],
-        ];
-
-        return response()->json(['success' => true, 'data' => $data]);
+        try {
+            $treeData = $this->arbolGenService->showTree($animal, $request->user());
+            return response()->json([
+                'success' => true,
+                'data' => $this->formatResource(ArbolGenResource::class, $treeData)
+            ]);
+        } catch (AuthorizationException $e) {
+            return response()->json([
+                'success' => false,
+                'message' => $e->getMessage()
+            ], Response::HTTP_FORBIDDEN);
+        }
     }
 
     /**
      * Registra o actualiza la relación padre/madre de un animal.
      * Body: { tipo: 'Padre'|'Madre', id_padre: int }
      */
-    public function setProgenitor(Request $request, Animal $animal)
+    public function setParent(Request $request, Animal $animal)
     {
         $validator = Validator::make($request->all(), [
             'tipo'     => 'required|in:Padre,Madre',
-            'id_padre' => [
-                'required',
-                'integer',
-                'exists:animal,id_Animal',
-                function ($attr, $value, $fail) use ($animal) {
-                    if ($value == $animal->id_Animal) {
-                        $fail('Un animal no puede ser su propio progenitor.');
-                    }
-                },
-            ],
+            'padre_id' => 'required|integer|exists:animals,id',
         ]);
 
         if ($validator->fails()) {
             return response()->json(['success' => false, 'errors' => $validator->errors()], Response::HTTP_UNPROCESSABLE_ENTITY);
         }
 
-        // Validar sexo coherente con el tipo
-        $progenitor = Animal::find($request->id_padre);
-        if ($request->tipo === 'Padre' && $progenitor->Sexo === 'F') {
-            return response()->json(['success' => false, 'message' => 'El Padre debe ser un animal macho (M).'], Response::HTTP_UNPROCESSABLE_ENTITY);
-        }
-        if ($request->tipo === 'Madre' && $progenitor->Sexo === 'M') {
-            return response()->json(['success' => false, 'message' => 'La Madre debe ser un animal hembra (H).'], Response::HTTP_UNPROCESSABLE_ENTITY);
-        }
+        try {
+            $relacion = $this->arbolGenService->store($animal, $request->tipo, (int) $request->padre_id, $request->user());
 
-        $relacion = ArbolGen::updateOrCreate(
-            ['id_hijo' => $animal->id_Animal, 'tipo' => $request->tipo],
-            ['id_padre' => (int) $request->id_padre]
-        );
-
-        return response()->json([
-            'success' => true,
-            'message' => "Relación de {$request->tipo} guardada correctamente.",
-            'data'    => $relacion,
-        ], Response::HTTP_OK);
+            return response()->json([
+                'success' => true,
+                'message' => "Relación de {$request->tipo} guardada correctamente.",
+                'data'    => $relacion,
+            ], Response::HTTP_OK);
+        } catch (\Illuminate\Validation\ValidationException $e) {
+            return response()->json(['success' => false, 'errors' => $e->errors()], Response::HTTP_UNPROCESSABLE_ENTITY);
+        } catch (AuthorizationException $e) {
+            return response()->json([
+                'success' => false,
+                'message' => $e->getMessage()
+            ], Response::HTTP_FORBIDDEN);
+        }
     }
 
     /**
      * Elimina la relación padre o madre de un animal.
      * Route param: tipo = 'Padre'|'Madre'
      */
-    public function removeProgenitor(Animal $animal, string $tipo)
+    public function removeParent(Request $request, Animal $animal, string $tipo)
     {
         if (!in_array($tipo, ['Padre', 'Madre'])) {
             return response()->json(['success' => false, 'message' => 'Tipo inválido. Use Padre o Madre.'], Response::HTTP_UNPROCESSABLE_ENTITY);
         }
 
-        $deleted = ArbolGen::where('id_hijo', $animal->id_Animal)
-            ->where('tipo', $tipo)
-            ->delete();
+        try {
+            $deleted = $this->arbolGenService->destroy($animal, $tipo, $request->user());
 
-        if (!$deleted) {
-            return response()->json(['success' => false, 'message' => 'No se encontró la relación a eliminar.'], Response::HTTP_NOT_FOUND);
+            if (!$deleted) {
+                return response()->json(['success' => false, 'message' => 'No se encontró la relación a eliminar.'], Response::HTTP_NOT_FOUND);
+            }
+
+            return response()->json(['success' => true, 'message' => "Relación de {$tipo} eliminada."]);
+        } catch (AuthorizationException $e) {
+            return response()->json([
+                'success' => false,
+                'message' => $e->getMessage()
+            ], Response::HTTP_FORBIDDEN);
         }
-
-        return response()->json(['success' => true, 'message' => "Relación de {$tipo} eliminada."]);
     }
 
     /**
-     * Lista animales disponibles para asignar como progenitor (filtra por sexo coherente).
-     * Excluye: el propio animal, sus padres/abuelos actuales y sus hijos directos.
+     * Lista animales disponibles para asignar como progenitor.
      */
-    public function disponibles(Request $request, Animal $animal)
+    public function getAvailableParents(Request $request, Animal $animal)
     {
-        $tipo = $request->query('tipo');
+        try {
+            $tipo = $request->query('tipo');
+            $animales = $this->arbolGenService->getAvailableParents($animal, $tipo, $request->user());
 
-        // Cargar relaciones para calcular los excluidos
-        $animal->load([
-            'registroPadre.progenitor.registroPadre.progenitor',
-            'registroPadre.progenitor.registroMadre.progenitor',
-            'registroMadre.progenitor.registroPadre.progenitor',
-            'registroMadre.progenitor.registroMadre.progenitor',
-            'hijos',
-        ]);
-
-        $excluidos = collect([$animal->id_Animal]);
-
-        // Padre y madre directos
-        $padre = optional($animal->registroPadre)->progenitor;
-        $madre = optional($animal->registroMadre)->progenitor;
-        if ($padre) $excluidos->push($padre->id_Animal);
-        if ($madre) $excluidos->push($madre->id_Animal);
-
-        // Abuelos
-        if ($padre) {
-            $abueloP = optional($padre->registroPadre)->progenitor;
-            $abuelaP = optional($padre->registroMadre)->progenitor;
-            if ($abueloP) $excluidos->push($abueloP->id_Animal);
-            if ($abuelaP) $excluidos->push($abuelaP->id_Animal);
+            return response()->json([
+                'success' => true,
+                'data' => $this->formatCollection(AnimalResource::class, $animales)
+            ]);
+        } catch (AuthorizationException $e) {
+            return response()->json([
+                'success' => false,
+                'message' => $e->getMessage()
+            ], Response::HTTP_FORBIDDEN);
         }
-        if ($madre) {
-            $abueloM = optional($madre->registroPadre)->progenitor;
-            $abuelaM = optional($madre->registroMadre)->progenitor;
-            if ($abueloM) $excluidos->push($abueloM->id_Animal);
-            if ($abuelaM) $excluidos->push($abuelaM->id_Animal);
-        }
-
-        // Hijos directos
-        $animal->hijos->each(fn($rel) => $excluidos->push($rel->id_hijo));
-
-        $query = Animal::where('archivado', false)
-            ->whereNotIn('id_Animal', $excluidos->unique()->values());
-
-        if ($tipo === 'Padre') {
-            $query->where('Sexo', 'M');
-        } elseif ($tipo === 'Madre') {
-            $query->where('Sexo', 'F');
-        }
-
-        $animales = $query->orderBy('Nombre')
-            ->get(['id_Animal', 'Nombre', 'codigo_animal', 'Sexo']);
-
-        return response()->json(['success' => true, 'data' => $animales]);
-    }
-
-    // ─── Helper ───────────────────────────────────────────────────────────────
-
-    private function animalBasic(Animal $a): array
-    {
-        return [
-            'id_Animal'     => $a->id_Animal,
-            'Nombre'        => $a->Nombre,
-            'codigo_animal' => $a->codigo_animal,
-            'Sexo'          => $a->Sexo,
-            'fecha_nacimiento' => $a->fecha_nacimiento?->format('Y-m-d'),
-        ];
     }
 }

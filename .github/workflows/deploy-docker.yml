@@ -1,0 +1,25 @@
+name: Deploy backend to docker
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Deploy to VPS
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USERNAME }}
+          password: ${{ secrets.VPS_PASSWORD }}
+          script: |
+            cd ${{ secrets.DEPLOY_PATH_PROD }}
+            git fetch origin ${{ vars.DEPLOY_BRANCH }}
+            git checkout ${{ vars.DEPLOY_BRANCH }}
+            git merge origin/${{ vars.DEPLOY_BRANCH }}
+            cd ..
+            docker compose -f docker-compose.prod.yml up -d --build ganaderasoft-backend

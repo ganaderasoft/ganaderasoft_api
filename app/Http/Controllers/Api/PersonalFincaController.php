@@ -3,78 +3,63 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
-use App\Models\PersonalFinca;
 use Illuminate\Http\Request;
 use Illuminate\Http\Response;
 use Illuminate\Support\Facades\Validator;
+use App\Services\Personal\PersonalFincaService;
+use App\Http\Resources\Personal\PersonalFincaResource;
+use Illuminate\Auth\Access\AuthorizationException;
+use Illuminate\Database\Eloquent\ModelNotFoundException;
+use App\Models\PersonalFinca;
+use App\Models\User;
+use Exception;
 
 class PersonalFincaController extends Controller
 {
-    /**
-     * Display a listing of personal finca.
-     */
+    protected $personalFincaService;
+
+    public function __construct(PersonalFincaService $personalFincaService)
+    {
+        $this->personalFincaService = $personalFincaService;
+        
+        $this->middleware(\App\Http\Middleware\Legacy\PersonalFinca\NormalizeIndex::class)->only('index');
+        $this->middleware(\App\Http\Middleware\Legacy\PersonalFinca\NormalizeStore::class)->only('store');
+        $this->middleware(\App\Http\Middleware\Legacy\PersonalFinca\NormalizeShow::class)->only('show');
+        $this->middleware(\App\Http\Middleware\Legacy\PersonalFinca\NormalizeUpdate::class)->only('update');
+    }
+
     public function index(Request $request)
     {
-        $user = $request->user();
-        
-        $query = PersonalFinca::with(['finca']);
+        try {
+            $filters = $request->only(['finca_id', 'tipo_trabajador_id', 'nombre', 'status', 'nopaginate', 'incluir_inactivos']);
+            $personal = $this->personalFincaService->listPersonal($filters, $request->user());
 
-        // Apply filters
-        if ($request->has('id_finca')) {
-            $query->forFinca($request->id_finca);
+            return response()->json([
+                'success' => true,
+                'message' => 'Lista de personal de finca obtenida exitosamente',
+                'data' => $this->formatCollection(PersonalFincaResource::class, $personal)
+            ], Response::HTTP_OK);
+        } catch (AuthorizationException $e) {
+            return response()->json([
+                'success' => false,
+                'message' => $e->getMessage()
+            ], Response::HTTP_FORBIDDEN);
         }
-
-        if ($request->has('tipo_trabajador')) {
-            $query->byTipoTrabajador($request->tipo_trabajador);
-        }
-
-        if ($request->has('nombre')) {
-            $query->byName($request->nombre);
-        }
-
-        // If user is not admin, only show personal from their finca
-        if (!$user->isAdmin()) {
-            if ($user->isPropietario()) {
-                $fincaIds = $user->propietario->fincas->pluck('id_Finca');
-                $query->whereIn('id_Finca', $fincaIds);
-            } else {
-                return response()->json([
-                    'success' => false,
-                    'message' => 'No tiene permisos para ver esta informacion'
-                ], Response::HTTP_FORBIDDEN);
-            }
-        }
-
-        $personalFinca = $query->paginate(15);
-
-        return response()->json([
-            'success' => true,
-            'message' => 'Lista de personal de finca obtenida exitosamente',
-            'data' => $personalFinca->items(),
-            'pagination' => [
-                'current_page' => $personalFinca->currentPage(),
-                'last_page' => $personalFinca->lastPage(),
-                'per_page' => $personalFinca->perPage(),
-                'total' => $personalFinca->total(),
-            ]
-        ], Response::HTTP_OK);
     }
 
-    /**
-     * Store a newly created personal finca.
-     */
     public function store(Request $request)
     {
-        $user = $request->user();
-
         $validator = Validator::make($request->all(), [
-            'id_Finca' => 'required|exists:finca,id_Finca',
-            'Cedula' => 'required|integer|unique:personal_finca,Cedula',
-            'Nombre' => 'required|string|max:25',
-            'Apellido' => 'required|string|max:25',
-            'Telefono' => 'required|string|max:15',
-            'Correo' => 'required|email|max:40',
-            'Tipo_Trabajador' => 'required|string|max:20',
+            'finca_id' => 'required|exists:fincas,id',
+            'cedula' => 'required|string|regex:/^[VEJPG][0-9]+$/',
+            'nombre' => 'required|string|max:25',
+            'apellido' => 'required|string|max:25',
+            'telefono' => 'required|string|max:15',
+            'correo' => 'required|email|max:40',
+            'fecha_nacimiento' => 'nullable|date',
+            'tipo_trabajador_id' => 'required|exists:tipo_trabajadors,id',
+            'status' => 'nullable|in:activo,inactivo,1,0,true,false,True,False',
+            'fecha_ingreso' => 'nullable|date',
         ]);
 
         if ($validator->fails()) {
@@ -85,115 +70,58 @@ class PersonalFincaController extends Controller
             ], Response::HTTP_UNPROCESSABLE_ENTITY);
         }
 
-        // Check permissions
-        if (!$user->isAdmin()) {
-            if ($user->isPropietario()) {
-                $fincaIds = $user->propietario->fincas->pluck('id_Finca');
-                if (!$fincaIds->contains($request->id_Finca)) {
-                    return response()->json([
-                        'success' => false,
-                        'message' => 'No tiene permisos para agregar personal a esta finca'
-                    ], Response::HTTP_FORBIDDEN);
-                }
-            } else {
-                return response()->json([
-                    'success' => false,
-                    'message' => 'No tiene permisos para agregar personal'
-                ], Response::HTTP_FORBIDDEN);
-            }
+        try {
+            $personal = $this->personalFincaService->storePersonal($request->all(), $request->user());
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Personal de finca creado exitosamente',
+                'data' => new PersonalFincaResource($personal)
+            ], Response::HTTP_CREATED);
+        } catch (AuthorizationException $e) {
+            return response()->json([
+                'success' => false,
+                'message' => $e->getMessage()
+            ], Response::HTTP_FORBIDDEN);
         }
-
-        $personalFinca = PersonalFinca::create($request->all());
-        $personalFinca->load(['finca']);
-
-        return response()->json([
-            'success' => true,
-            'message' => 'Personal de finca creado exitosamente',
-            'data' => $personalFinca
-        ], Response::HTTP_CREATED);
     }
 
-    /**
-     * Display the specified personal finca.
-     */
     public function show(Request $request, $id)
     {
-        $user = $request->user();
-        $personalFinca = PersonalFinca::with(['finca'])->find($id);
+        try {
+            $personal = $this->personalFincaService->getPersonal($id, $request->user());
 
-        if (!$personalFinca) {
+            return response()->json([
+                'success' => true,
+                'message' => 'Personal de finca obtenido exitosamente',
+                'data' => new PersonalFincaResource($personal)
+            ], Response::HTTP_OK);
+        } catch (AuthorizationException $e) {
+            return response()->json([
+                'success' => false,
+                'message' => $e->getMessage()
+            ], Response::HTTP_FORBIDDEN);
+        } catch (ModelNotFoundException $e) {
             return response()->json([
                 'success' => false,
                 'message' => 'Personal de finca no encontrado'
             ], Response::HTTP_NOT_FOUND);
         }
-
-        // Check permissions
-        if (!$user->isAdmin()) {
-            if ($user->isPropietario()) {
-                $fincaIds = $user->propietario->fincas->pluck('id_Finca');
-                if (!$fincaIds->contains($personalFinca->id_Finca)) {
-                    return response()->json([
-                        'success' => false,
-                        'message' => 'No tiene permisos para ver este personal'
-                    ], Response::HTTP_FORBIDDEN);
-                }
-            } else {
-                return response()->json([
-                    'success' => false,
-                    'message' => 'No tiene permisos para ver esta información'
-                ], Response::HTTP_FORBIDDEN);
-            }
-        }
-
-        return response()->json([
-            'success' => true,
-            'message' => 'Personal de finca obtenido exitosamente',
-            'data' => $personalFinca
-        ], Response::HTTP_OK);
     }
 
-    /**
-     * Update the specified personal finca.
-     */
     public function update(Request $request, $id)
     {
-        $user = $request->user();
-        $personalFinca = PersonalFinca::find($id);
-
-        if (!$personalFinca) {
-            return response()->json([
-                'success' => false,
-                'message' => 'Personal de finca no encontrado'
-            ], Response::HTTP_NOT_FOUND);
-        }
-
-        // Check permissions
-        if (!$user->isAdmin()) {
-            if ($user->isPropietario()) {
-                $fincaIds = $user->propietario->fincas->pluck('id_Finca');
-                if (!$fincaIds->contains($personalFinca->id_Finca)) {
-                    return response()->json([
-                        'success' => false,
-                        'message' => 'No tiene permisos para editar este personal'
-                    ], Response::HTTP_FORBIDDEN);
-                }
-            } else {
-                return response()->json([
-                    'success' => false,
-                    'message' => 'No tiene permisos para editar personal'
-                ], Response::HTTP_FORBIDDEN);
-            }
-        }
-
         $validator = Validator::make($request->all(), [
-            'id_Finca' => 'sometimes|exists:finca,id_Finca',
-            'Cedula' => 'sometimes|integer|unique:personal_finca,Cedula,' . $id . ',id_Tecnico',
-            'Nombre' => 'sometimes|string|max:25',
-            'Apellido' => 'sometimes|string|max:25',
-            'Telefono' => 'sometimes|string|max:15',
-            'Correo' => 'sometimes|email|max:40',
-            'Tipo_Trabajador' => 'sometimes|string|max:20',
+            'finca_id' => 'sometimes|exists:fincas,id',
+            'cedula' => 'sometimes|string|regex:/^[VEJPG][0-9]+$/',
+            'nombre' => 'sometimes|string|max:25',
+            'apellido' => 'sometimes|string|max:25',
+            'telefono' => 'sometimes|string|max:15',
+            'correo' => 'sometimes|email|max:40',
+            'fecha_nacimiento' => 'nullable|date',
+            'tipo_trabajador_id' => 'sometimes|exists:tipo_trabajadors,id',
+            'status' => 'sometimes|nullable|in:activo,inactivo,1,0,true,false,True,False',
+            'fecha_ingreso' => 'sometimes|nullable|date',
         ]);
 
         if ($validator->fails()) {
@@ -204,54 +132,126 @@ class PersonalFincaController extends Controller
             ], Response::HTTP_UNPROCESSABLE_ENTITY);
         }
 
-        $personalFinca->update($request->all());
-        $personalFinca->load(['finca']);
+        try {
+            $personal = $this->personalFincaService->updatePersonal($id, $request->all(), $request->user());
 
-        return response()->json([
-            'success' => true,
-            'message' => 'Personal de finca actualizado exitosamente',
-            'data' => $personalFinca
-        ], Response::HTTP_OK);
-    }
-
-    /**
-     * Remove the specified personal finca.
-     */
-    public function destroy(Request $request, $id)
-    {
-        $user = $request->user();
-        $personalFinca = PersonalFinca::find($id);
-
-        if (!$personalFinca) {
+            return response()->json([
+                'success' => true,
+                'message' => 'Personal de finca actualizado exitosamente',
+                'data' => new PersonalFincaResource($personal)
+            ], Response::HTTP_OK);
+        } catch (AuthorizationException $e) {
+            return response()->json([
+                'success' => false,
+                'message' => $e->getMessage()
+            ], Response::HTTP_FORBIDDEN);
+        } catch (ModelNotFoundException $e) {
             return response()->json([
                 'success' => false,
                 'message' => 'Personal de finca no encontrado'
             ], Response::HTTP_NOT_FOUND);
         }
+    }
 
-        // Check permissions
-        if (!$user->isAdmin()) {
-            if ($user->isPropietario()) {
-                $fincaIds = $user->propietario->fincas->pluck('id_Finca');
-                if (!$fincaIds->contains($personalFinca->id_Finca)) {
-                    return response()->json([
-                        'success' => false,
-                        'message' => 'No tiene permisos para eliminar este personal'
-                    ], Response::HTTP_FORBIDDEN);
-                }
-            } else {
-                return response()->json([
-                    'success' => false,
-                    'message' => 'No tiene permisos para eliminar personal'
-                ], Response::HTTP_FORBIDDEN);
-            }
+    public function destroy(Request $request, $id)
+    {
+        try {
+            $this->personalFincaService->deletePersonal($id, $request->user());
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Personal de finca eliminado exitosamente'
+            ], Response::HTTP_OK);
+        } catch (AuthorizationException $e) {
+            return response()->json([
+                'success' => false,
+                'message' => $e->getMessage()
+            ], Response::HTTP_FORBIDDEN);
+        } catch (ModelNotFoundException $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Personal de finca no encontrado'
+            ], Response::HTTP_NOT_FOUND);
         }
+    }
 
-        $personalFinca->delete();
+    public function enable(Request $request, $id)
+    {
+        try {
+            $personal = $this->personalFincaService->enable($id, $request->user());
 
-        return response()->json([
-            'success' => true,
-            'message' => 'Personal de finca eliminado exitosamente'
-        ], Response::HTTP_OK);
+            return response()->json([
+                'success' => true,
+                'message' => 'Personal de finca activado exitosamente',
+                'data' => new PersonalFincaResource($personal)
+            ], Response::HTTP_OK);
+        } catch (AuthorizationException $e) {
+            return response()->json([
+                'success' => false,
+                'message' => $e->getMessage()
+            ], Response::HTTP_FORBIDDEN);
+        } catch (ModelNotFoundException $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Personal de finca no encontrado'
+            ], Response::HTTP_NOT_FOUND);
+        }
+    }
+
+    public function disable(Request $request, $id)
+    {
+        try {
+            $personal = $this->personalFincaService->disable($id, $request->user());
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Personal de finca desactivado exitosamente',
+                'data' => new PersonalFincaResource($personal)
+            ], Response::HTTP_OK);
+        } catch (AuthorizationException $e) {
+            return response()->json([
+                'success' => false,
+                'message' => $e->getMessage()
+            ], Response::HTTP_FORBIDDEN);
+        } catch (ModelNotFoundException $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Personal de finca no encontrado'
+            ], Response::HTTP_NOT_FOUND);
+        }
+    }
+
+    public function convertToUser(Request $request, $id)
+    {
+        $request->validate([
+            'password' => 'required|string|min:8|confirmed',
+            'password_confirmation' => 'required|string|same:password',
+            'roles' => 'required|array',
+            'roles.*' => 'string|exists:roles,code'
+        ]);
+
+        try {
+            $personalFinca = PersonalFinca::findOrFail($id);
+            $user = $this->personalFincaService->convertToUser($personalFinca, $request->all(), $request->user());
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Cuenta de usuario creada exitosamente',
+                'data' => [
+                    'user' => $user
+                ]
+            ], Response::HTTP_CREATED);
+
+        } catch (AuthorizationException $e) {
+            return response()->json([
+                'success' => false,
+                'message' => $e->getMessage()
+            ], Response::HTTP_FORBIDDEN);
+        } catch (Exception $e) {
+            return response()->json([
+                'success' => false,
+                'message' => $e->getMessage()
+            ], Response::HTTP_INTERNAL_SERVER_ERROR);
+        }
     }
 }

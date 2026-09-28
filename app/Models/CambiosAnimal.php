@@ -9,77 +9,82 @@ class CambiosAnimal extends Model
 {
     use HasFactory;
 
-    protected $table = 'cambios_animal';
-
-    protected $primaryKey = 'id_Cambio';
-
     protected $fillable = [
-        'Fecha_Cambio',
-        'Etapa_Cambio',
-        'Peso',
-        'Altura',
-        'Comentario',
-        'cambios_etapa_anid',
-        'cambios_etapa_etid',
+        'animal_etapa_id',
+        'fecha_cambio',
+        'etapa_cambio',
+        'peso',
+        'altura',
+        'comentario',
     ];
 
     protected $casts = [
-        'Fecha_Cambio' => 'date',
-        'Peso' => 'float',
-        'Altura' => 'float',
+        'fecha_cambio' => 'date',
+        'peso' => 'float',
+        'altura' => 'float',
     ];
 
     /**
-     * Get the etapa animal relationship.
-     * Using whereColumn to handle composite keys properly.
+     * Obtener el registro etapa animal asociado a este cambio.
      */
     public function etapaAnimal()
     {
-        return $this->hasOne(EtapaAnimal::class, 'etan_animal_id', 'cambios_etapa_anid')
-            ->whereColumn('etan_etapa_id', 'cambios_animal.cambios_etapa_etid');
+        return $this->belongsTo(EtapaAnimal::class, 'animal_etapa_id', 'id');
     }
 
     /**
-     * Get the animal through the direct foreign key.
+     * Obtener la etapa asociada a este cambio a través de etapa animal.
+     */
+    public function etapa()
+    {
+        return $this->hasOneThrough(Etapa::class, EtapaAnimal::class, 'id', 'id', 'animal_etapa_id', 'etapa_id');
+    }
+
+    /**
+     * Obtener el animal asociado a este cambio a través de etapa animal.
      */
     public function animal()
     {
-        return $this->belongsTo(Animal::class, 'cambios_etapa_anid', 'id_Animal');
+        return $this->hasOneThrough(Animal::class, EtapaAnimal::class, 'id', 'id', 'animal_etapa_id', 'animal_id');
     }
 
     /**
-     * Scope a query to filter by date range.
+     * Filtro para buscar cambios por un rango de fechas.
      */
     public function scopeByDateRange($query, $startDate, $endDate = null)
     {
         if ($endDate) {
-            return $query->whereBetween('Fecha_Cambio', [$startDate, $endDate]);
+            return $query->whereBetween('fecha_cambio', [$startDate, $endDate]);
         }
 
-        return $query->where('Fecha_Cambio', '>=', $startDate);
+        return $query->where('fecha_cambio', '>=', $startDate);
     }
 
     /**
-     * Scope a query to filter by animal.
+     * Filtro para buscar cambios por animal.
      */
     public function scopeForAnimal($query, $animalId)
     {
-        return $query->where('cambios_etapa_anid', $animalId);
+        return $query->whereHas('etapaAnimal', function ($q) use ($animalId) {
+            $q->where('animal_id', $animalId);
+        });
     }
 
     /**
-     * Scope a query to filter by etapa.
+     * Filtro para buscar cambios por etapa.
      */
     public function scopeForEtapa($query, $etapaId)
     {
-        return $query->where('cambios_etapa_etid', $etapaId);
+        return $query->whereHas('etapaAnimal', function ($q) use ($etapaId) {
+            $q->where('etapa_id', $etapaId);
+        });
     }
 
     /**
-     * Scope a query to filter by etapa cambio.
+     * Filtro para filtrar por etapa cambio.
      */
     public function scopeByEtapaCambio($query, $etapaCambio)
     {
-        return $query->where('Etapa_Cambio', $etapaCambio);
+        return $query->where('etapa_cambio', $etapaCambio);
     }
 }
