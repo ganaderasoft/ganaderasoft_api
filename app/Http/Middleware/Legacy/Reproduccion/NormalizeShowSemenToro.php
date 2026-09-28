@@ -1,0 +1,49 @@
+<?php
+
+namespace App\Http\Middleware\Legacy\Reproduccion;
+
+use Closure;
+use Illuminate\Http\Request;
+use Symfony\Component\HttpFoundation\Response;
+
+class NormalizeShowSemenToro
+{
+    public function handle(Request $request, Closure $next): Response
+    {
+        $response = $next($request);
+
+        if ($request->header('X-API-VERSION') === '2') {
+            return $response;
+        }
+
+        if ($response->isSuccessful() && $response->headers->get('Content-Type') === 'application/json') {
+            $data = json_decode($response->getContent(), true);
+
+            if (isset($data['data']) && is_array($data['data'])) {
+                $data['data'] = $this->mapToLegacy($data['data']);
+                $response->setContent(json_encode($data));
+            }
+        }
+
+        return $response;
+    }
+
+    private function mapToLegacy(array $item): array
+    {
+        $legacy = [
+            'semen_id'          => $item['id'] ?? null,
+            'id_Toro'           => $item['animal_id'] ?? ($item['toro']['id'] ?? null),
+            'semen_estado'      => $item['estado'] ?? null,
+            'semen_fecha'       => $item['fecha'] ?? null,
+            'cantidad_pajuelas' => $item['cantidad_pajuelas'] ?? null,
+            'created_at'        => $item['created_at'] ?? null,
+            'updated_at'        => $item['updated_at'] ?? null,
+            'toro'              => $item['toro'] ?? null,
+            'servicios'         => $item['servicios'] ?? null,
+        ];
+
+        return array_filter($legacy, function($value) {
+            return $value !== null;
+        });
+    }
+}

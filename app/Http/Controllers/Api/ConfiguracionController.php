@@ -5,20 +5,31 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use Illuminate\Http\Request;
 use Illuminate\Http\Response;
+use App\Services\Configuracion\ConfiguracionService;
+use App\Http\Resources\Configuracion\ConfiguracionResource;
+use App\Http\Middleware\Legacy\Configuracion\NormalizeConfiguracion;
 
 class ConfiguracionController extends Controller
 {
+    protected $configuracionService;
+
+    public function __construct(ConfiguracionService $configuracionService)
+    {
+        $this->configuracionService = $configuracionService;
+        $this->middleware(NormalizeConfiguracion::class);
+    }
+
     /**
      * Get Tipo Explotacion list.
      */
     public function tipoExplotacion()
     {
         try {
-            $data = $this->getJsonData('tipo-explotacion.json');
+            $data = $this->configuracionService->getTipoExplotacion();
             return response()->json([
                 'success' => true,
                 'message' => 'Lista de tipos de explotación obtenida exitosamente',
-                'data' => $data
+                'data' => ConfiguracionResource::collection($data)
             ], Response::HTTP_OK);
         } catch (\Exception $e) {
             return response()->json([
@@ -35,11 +46,11 @@ class ConfiguracionController extends Controller
     public function metodoRiego()
     {
         try {
-            $data = $this->getJsonData('metodo-riego.json');
+            $data = $this->configuracionService->getMetodoRiego();
             return response()->json([
                 'success' => true,
                 'message' => 'Lista de métodos de riego obtenida exitosamente',
-                'data' => $data
+                'data' => ConfiguracionResource::collection($data)
             ], Response::HTTP_OK);
         } catch (\Exception $e) {
             return response()->json([
@@ -56,11 +67,11 @@ class ConfiguracionController extends Controller
     public function phSuelo()
     {
         try {
-            $data = $this->getJsonData('ph-suelo.json');
+            $data = $this->configuracionService->getPhSuelo();
             return response()->json([
                 'success' => true,
                 'message' => 'Lista de pH de suelo obtenida exitosamente',
-                'data' => $data
+                'data' => ConfiguracionResource::collection($data)
             ], Response::HTTP_OK);
         } catch (\Exception $e) {
             return response()->json([
@@ -77,11 +88,11 @@ class ConfiguracionController extends Controller
     public function texturaSuelo()
     {
         try {
-            $data = $this->getJsonData('textura-suelo.json');
+            $data = $this->configuracionService->getTexturaSuelo();
             return response()->json([
                 'success' => true,
                 'message' => 'Lista de texturas de suelo obtenida exitosamente',
-                'data' => $data
+                'data' => ConfiguracionResource::collection($data)
             ], Response::HTTP_OK);
         } catch (\Exception $e) {
             return response()->json([
@@ -98,11 +109,11 @@ class ConfiguracionController extends Controller
     public function fuenteAgua()
     {
         try {
-            $data = $this->getJsonData('fuente-agua.json');
+            $data = $this->configuracionService->getFuenteAgua();
             return response()->json([
                 'success' => true,
                 'message' => 'Lista de fuentes de agua obtenida exitosamente',
-                'data' => $data
+                'data' => ConfiguracionResource::collection($data)
             ], Response::HTTP_OK);
         } catch (\Exception $e) {
             return response()->json([
@@ -119,11 +130,11 @@ class ConfiguracionController extends Controller
     public function sexo()
     {
         try {
-            $data = $this->getJsonData('sexo.json');
+            $data = $this->configuracionService->getSexo();
             return response()->json([
                 'success' => true,
                 'message' => 'Lista de sexos obtenida exitosamente',
-                'data' => $data
+                'data' => ConfiguracionResource::collection($data)
             ], Response::HTTP_OK);
         } catch (\Exception $e) {
             return response()->json([
@@ -140,11 +151,11 @@ class ConfiguracionController extends Controller
     public function tipoRelieve()
     {
         try {
-            $data = $this->getJsonData('tipo-relieve.json');
+            $data = $this->configuracionService->getTipoRelieve();
             return response()->json([
                 'success' => true,
                 'message' => 'Lista de tipos de relieve obtenida exitosamente',
-                'data' => $data
+                'data' => ConfiguracionResource::collection($data)
             ], Response::HTTP_OK);
         } catch (\Exception $e) {
             return response()->json([
@@ -153,26 +164,5 @@ class ConfiguracionController extends Controller
                 'error' => $e->getMessage()
             ], Response::HTTP_INTERNAL_SERVER_ERROR);
         }
-    }
-
-    /**
-     * Helper method to read JSON data from resources.
-     */
-    private function getJsonData($filename)
-    {
-        $path = resource_path("datos-constantes/{$filename}");
-        
-        if (!file_exists($path)) {
-            throw new \Exception("Archivo de configuración no encontrado: {$filename}");
-        }
-
-        $content = file_get_contents($path);
-        $data = json_decode($content, true);
-
-        if (json_last_error() !== JSON_ERROR_NONE) {
-            throw new \Exception("Error al decodificar JSON: " . json_last_error_msg());
-        }
-
-        return $data;
     }
 }

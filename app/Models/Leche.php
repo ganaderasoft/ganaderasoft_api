@@ -9,67 +9,60 @@ class Leche extends Model
 {
     use HasFactory;
 
-    protected $table = 'leche';
-    protected $primaryKey = 'leche_id';
-
     protected $fillable = [
-        'leche_fecha_pesaje',
-        'leche_pesaje_Total',
-        'leche_lactancia_id',
+        'lactancia_id',
+        'fecha_pesaje',
+        'pesaje_total',
     ];
 
     protected $casts = [
-        'leche_fecha_pesaje' => 'date',
-        'leche_pesaje_Total' => 'decimal:2',
+        'fecha_pesaje' => 'date',
+        'pesaje_total' => 'decimal:2',
     ];
 
     /**
-     * Get the lactancia that owns this leche record.
+     * Obtener la lactancia asociada a este pesaje de leche.
      */
     public function lactancia()
     {
-        return $this->belongsTo(Lactancia::class, 'leche_lactancia_id', 'lactancia_id');
+        return $this->belongsTo(Lactancia::class, 'lactancia_id', 'id');
     }
 
     /**
-     * Get the animal through lactancia.
+     * Obtener el animal asociado a este pesaje a través de la lactancia y etapa animal.
      */
     public function animal()
     {
-        return $this->hasOneThrough(
-            Animal::class,
-            Lactancia::class,
-            'lactancia_id',
-            'id_Animal',
-            'leche_lactancia_id',
-            'lactancia_etapa_anid'
-        );
+        return $this->hasOneThrough(Animal::class, Lactancia::class, 'id', 'id', 'lactancia_id', 'animal_etapa_id')
+            ->join('animal_etapa', 'animal_etapa.id', '=', 'lactancias.animal_etapa_id')
+            ->whereColumn('animals.id', 'animal_etapa.animal_id');
     }
 
     /**
-     * Scope a query to filter by date range.
+     * Filtro para buscar por un rango de fechas.
      */
     public function scopeByDateRange($query, $startDate, $endDate = null)
     {
         if ($endDate) {
-            return $query->whereBetween('leche_fecha_pesaje', [$startDate, $endDate]);
+            return $query->whereBetween('fecha_pesaje', [$startDate, $endDate]);
         }
-        return $query->where('leche_fecha_pesaje', '>=', $startDate);
+
+        return $query->where('fecha_pesaje', '>=', $startDate);
     }
 
     /**
-     * Scope a query to filter by lactancia.
+     * Filtro para buscar por lactancia.
      */
     public function scopeForLactancia($query, $lactanciaId)
     {
-        return $query->where('leche_lactancia_id', $lactanciaId);
+        return $query->where('lactancia_id', $lactanciaId);
     }
 
     /**
-     * Scope a query to filter by minimum production.
+     * Filtro para filtrar por minimum production.
      */
     public function scopeMinProduction($query, $minAmount)
     {
-        return $query->where('leche_pesaje_Total', '>=', $minAmount);
+        return $query->where('pesaje_total', '>=', $minAmount);
     }
 }

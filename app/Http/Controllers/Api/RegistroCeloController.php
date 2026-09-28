@@ -3,114 +3,149 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
-use App\Models\RegistroCelo;
+use App\Http\Resources\Reproduccion\RegistroCeloResource;
+use App\Http\Middleware\Legacy\Reproduccion\NormalizeIndexRegistroCelo;
+use App\Http\Middleware\Legacy\Reproduccion\NormalizeShowRegistroCelo;
+use App\Http\Middleware\Legacy\Reproduccion\NormalizeStoreRegistroCelo;
+use App\Http\Middleware\Legacy\Reproduccion\NormalizeUpdateRegistroCelo;
+use App\Services\Reproduccion\RegistroCeloService;
 use Illuminate\Http\Request;
 use Illuminate\Http\Response;
-use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Validator;
+use Illuminate\Database\Eloquent\ModelNotFoundException;
+use Illuminate\Validation\ValidationException;
 
 class RegistroCeloController extends Controller
 {
+    public function __construct(
+        protected RegistroCeloService $celoService
+    ) {
+        $this->middleware(NormalizeIndexRegistroCelo::class)->only('index');
+        $this->middleware(NormalizeShowRegistroCelo::class)->only('show');
+        $this->middleware(NormalizeStoreRegistroCelo::class)->only('store');
+        $this->middleware(NormalizeUpdateRegistroCelo::class)->only('update');
+    }
+
     public function index(Request $request)
     {
-        $user = $request->user();
-        $query = RegistroCelo::with('animal', 'etapa');
-
-        if ($request->has('animal_id')) {
-            $query->forAnimal($request->animal_id);
-        }
-        if ($request->has('fecha_inicio')) {
-            $query->byDateRange($request->fecha_inicio, $request->get('fecha_fin'));
-        }
-
-        if (!$user->isAdmin() && $user->isPropietario()) {
-            $propietario = $user->propietario;
-            if ($propietario) {
-                $query->whereHas('animal.rebano.finca', function ($q) use ($propietario) {
-                    $q->where('id_Propietario', $propietario->id);
-                });
-            }
-        }
-
-        $records = $query->paginate(15);
+        $filters = $request->only(['animal_id', 'fecha_inicio', 'fecha_fin', 'nopaginate']);
+        
+        $records = $this->celoService->getPaginatedCelos($filters, $request->user());
 
         return response()->json([
-            'success'    => true,
-            'message'    => 'Registros de celo',
-            'data'       => $records->items(),
-            'pagination' => [
-                'current_page' => $records->currentPage(),
-                'last_page'    => $records->lastPage(),
-                'per_page'     => $records->perPage(),
-                'total'        => $records->total(),
-            ],
-        ]);
+            'success' => true,
+            'message' => 'Registros de celo obtenidos exitosamente',
+            'data'    => $this->formatCollection(RegistroCeloResource::class, $records),
+        ], Response::HTTP_OK);
     }
 
     public function store(Request $request)
     {
         $validator = Validator::make($request->all(), [
-            'celo_fecha'       => 'required|date',
-            'celo_observacon'  => 'nullable|string|max:100',
-            'celo_etapa_anid'  => 'required|exists:animal,id_Animal',
-            'celo_etapa_etid'  => 'required|exists:etapa,etapa_id',
+            'fecha'           => 'required|date',
+            'observacion'     => 'nullable|string|max:100',
+            'animal_etapa_id' => 'required_without_all:animal_id,etapa_id|exists:animal_etapa,id',
+            'animal_id'       => 'required_without:animal_etapa_id|exists:animals,id',
+            'etapa_id'        => 'required_without:animal_etapa_id|exists:etapas,id',
         ]);
 
         if ($validator->fails()) {
-            return response()->json(['success' => false, 'errors' => $validator->errors()], Response::HTTP_UNPROCESSABLE_ENTITY);
+            return response()->json([
+                'success' => false, 
+                'message' => 'Datos de validación incorrectos',
+                'errors'  => $validator->errors()
+            ], Response::HTTP_UNPROCESSABLE_ENTITY);
         }
 
-        $etapaAnimalExists = DB::table('etapa_animal')
-            ->where('etan_animal_id', $request->celo_etapa_anid)
-            ->where('etan_etapa_id', $request->celo_etapa_etid)
-            ->exists();
+        try {
+            $celo = $this->celoService->createCelo($request->all(), request()->user());
 
-        if (!$etapaAnimalExists) {
-            return response()->json(['success' => false, 'message' => 'La relación etapa-animal no existe'], Response::HTTP_UNPROCESSABLE_ENTITY);
+            return response()->json([
+                'success' => true,
+                'message' => 'Registro de celo creado exitosamente',
+                'data'    => $this->formatResource(RegistroCeloResource::class, $celo),
+            ], Response::HTTP_CREATED);
+        } catch (ValidationException $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Error de validación',
+                'errors'  => $e->errors()
+            ], Response::HTTP_UNPROCESSABLE_ENTITY);
         }
-
-        $celo = RegistroCelo::create($request->only(['celo_fecha', 'celo_observacon', 'celo_etapa_anid', 'celo_etapa_etid']));
-
-        return response()->json(['success' => true, 'message' => 'Registro de celo creado', 'data' => $celo], Response::HTTP_CREATED);
     }
 
     public function show($id)
     {
-        $celo = RegistroCelo::with('animal', 'etapa', 'servicios')->find($id);
-        if (!$celo) {
-            return response()->json(['success' => false, 'message' => 'Registro no encontrado'], Response::HTTP_NOT_FOUND);
+        try {
+            $celo = $this->celoService->getCeloById((int)$id, request()->user());
+
+            return response()->json([
+                'success' => true, 
+                'message' => 'Registro de celo obtenido exitosamente',
+                'data'    => $this->formatResource(RegistroCeloResource::class, $celo)
+            ], Response::HTTP_OK);
+        } catch (ModelNotFoundException $e) {
+            return response()->json([
+                'success' => false, 
+                'message' => 'Registro de celo no encontrado'
+            ], Response::HTTP_NOT_FOUND);
         }
-        return response()->json(['success' => true, 'data' => $celo]);
     }
 
     public function update(Request $request, $id)
     {
-        $celo = RegistroCelo::find($id);
-        if (!$celo) {
-            return response()->json(['success' => false, 'message' => 'Registro no encontrado'], Response::HTTP_NOT_FOUND);
-        }
-
         $validator = Validator::make($request->all(), [
-            'celo_fecha'      => 'sometimes|date',
-            'celo_observacon' => 'nullable|string|max:100',
+            'fecha'           => 'sometimes|date',
+            'observacion'     => 'nullable|string|max:100',
+            'animal_etapa_id' => 'sometimes|exists:animal_etapa,id',
+            'animal_id'       => 'sometimes|exists:animals,id',
+            'etapa_id'        => 'sometimes|exists:etapas,id',
         ]);
 
         if ($validator->fails()) {
-            return response()->json(['success' => false, 'errors' => $validator->errors()], Response::HTTP_UNPROCESSABLE_ENTITY);
+            return response()->json([
+                'success' => false, 
+                'message' => 'Datos de validación incorrectos',
+                'errors'  => $validator->errors()
+            ], Response::HTTP_UNPROCESSABLE_ENTITY);
         }
 
-        $celo->update($request->only(['celo_fecha', 'celo_observacon']));
+        try {
+            $celo = $this->celoService->updateCelo((int)$id, $request->all(), request()->user());
 
-        return response()->json(['success' => true, 'message' => 'Registro de celo actualizado', 'data' => $celo]);
+            return response()->json([
+                'success' => true,
+                'message' => 'Registro de celo actualizado exitosamente',
+                'data'    => $this->formatResource(RegistroCeloResource::class, $celo),
+            ], Response::HTTP_OK);
+        } catch (ModelNotFoundException $e) {
+            return response()->json([
+                'success' => false, 
+                'message' => 'Registro de celo no encontrado'
+            ], Response::HTTP_NOT_FOUND);
+        } catch (ValidationException $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Error de validación',
+                'errors'  => $e->errors()
+            ], Response::HTTP_UNPROCESSABLE_ENTITY);
+        }
     }
 
     public function destroy($id)
     {
-        $celo = RegistroCelo::find($id);
-        if (!$celo) {
-            return response()->json(['success' => false, 'message' => 'Registro no encontrado'], Response::HTTP_NOT_FOUND);
+        try {
+            $this->celoService->deleteCelo((int)$id, request()->user());
+
+            return response()->json([
+                'success' => true, 
+                'message' => 'Registro de celo eliminado exitosamente'
+            ], Response::HTTP_OK);
+        } catch (ModelNotFoundException $e) {
+            return response()->json([
+                'success' => false, 
+                'message' => 'Registro de celo no encontrado'
+            ], Response::HTTP_NOT_FOUND);
         }
-        $celo->delete();
-        return response()->json(['success' => true, 'message' => 'Registro de celo eliminado']);
     }
 }

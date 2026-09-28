@@ -6,14 +6,11 @@ use Illuminate\Database\Eloquent\Model;
 
 class VacunaCasa extends Model
 {
-    protected $table = 'vacuna_casa';
-    protected $primaryKey = null;
-    public $incrementing = false;
-    public $timestamps = false;
+    protected $table = 'casa_comercial_vacuna';
 
     protected $fillable = [
-        'vc_vacuna_id',
-        'vc_casa_id',
+        'casa_comercial_id',
+        'vacuna_id',
         'dosis_cantidad',
     ];
 
@@ -21,13 +18,19 @@ class VacunaCasa extends Model
         'dosis_cantidad' => 'float',
     ];
 
+    /**
+     * Obtener vacuna asociado/a.
+     */
     public function vacuna()
     {
-        return $this->belongsTo(Vacuna::class, 'vc_vacuna_id', 'vacuna_id');
+        return $this->belongsTo(Vacuna::class, 'vacuna_id', 'id');
     }
 
+    /**
+     * Obtener casa comercial asociado/a.
+     */
     public function casaComercial()
     {
-        return $this->belongsTo(CasaComercial::class, 'vc_casa_id', 'casa_id');
+        return $this->belongsTo(CasaComercial::class, 'casa_comercial_id', 'id');
     }
 }

@@ -9,82 +9,78 @@ class Lactancia extends Model
 {
     use HasFactory;
 
-    protected $table = 'lactancia';
-    protected $primaryKey = 'lactancia_id';
-
     protected $fillable = [
-        'lactancia_fecha_inicio',
-        'Lactancia_fecha_fin',
-        'lactancia_secado',
-        'lactancia_etapa_anid',
-        'lactancia_etapa_etid',
+        'animal_etapa_id',
+        'fecha_inicio',
+        'fecha_fin',
+        'secado',
     ];
 
     protected $casts = [
-        'lactancia_fecha_inicio' => 'date',
-        'Lactancia_fecha_fin' => 'date',
-        'lactancia_secado' => 'date',
+        'fecha_inicio' => 'date',
+        'fecha_fin' => 'date',
+        'secado' => 'date',
     ];
 
     /**
-     * Get the etapa animal relationship.
-     * NOTE: this relation should be used only for single-record lazy loading.
-     * Composite eager loading is handled through direct animal + etapa relations.
+     * Obtener el registro etapa animal asociado a esta lactancia.
      */
     public function etapaAnimal()
     {
-        return $this->hasOne(EtapaAnimal::class, 'etan_animal_id', 'lactancia_etapa_anid')
-            ->where('etan_etapa_id', $this->lactancia_etapa_etid);
+        return $this->belongsTo(EtapaAnimal::class, 'animal_etapa_id', 'id');
     }
 
     /**
-     * Get the etapa referenced by lactancia_etapa_etid.
+     * Obtener la etapa asociada a esta lactancia a través de etapa animal.
      */
     public function etapa()
     {
-        return $this->belongsTo(Etapa::class, 'lactancia_etapa_etid', 'etapa_id');
+        return $this->hasOneThrough(Etapa::class, EtapaAnimal::class, 'id', 'id', 'animal_etapa_id', 'etapa_id');
     }
 
     /**
-     * Get the animal through the direct foreign key.
+     * Obtener el animal asociado a esta lactancia a través de etapa animal.
      */
     public function animal()
     {
-        return $this->belongsTo(Animal::class, 'lactancia_etapa_anid', 'id_Animal');
+        return $this->hasOneThrough(Animal::class, EtapaAnimal::class, 'id', 'id', 'animal_etapa_id', 'animal_id');
     }
 
     /**
-     * Get the leche records for this lactancia.
+     * Obtener los registros de pesaje de leche para esta lactancia.
      */
     public function lecheRecords()
     {
-        return $this->hasMany(Leche::class, 'leche_lactancia_id', 'lactancia_id');
+        return $this->hasMany(Leche::class, 'lactancia_id', 'id');
     }
 
     /**
-     * Scope a query to filter by active lactation (no end date).
+     * Filtro para buscar lactancias activas (sin fecha de fin).
      */
     public function scopeActive($query)
     {
-        return $query->whereNull('Lactancia_fecha_fin');
+        return $query->whereNull('fecha_fin');
     }
 
     /**
-     * Scope a query to filter by date range.
+     * Filtro para buscar por un rango de fechas.
      */
     public function scopeByDateRange($query, $startDate, $endDate = null)
     {
         if ($endDate) {
-            return $query->whereBetween('lactancia_fecha_inicio', [$startDate, $endDate]);
+            return $query->whereBetween('fecha_inicio', [$startDate, $endDate]);
         }
-        return $query->where('lactancia_fecha_inicio', '>=', $startDate);
+
+        return $query->where('fecha_inicio', '>=', $startDate);
     }
 
     /**
-     * Scope a query to filter by animal.
+     * Filtro para buscar lactancias por animal.
      */
     public function scopeForAnimal($query, $animalId)
     {
-        return $query->where('lactancia_etapa_anid', $animalId);
+        return $query->whereHas('etapaAnimal', function ($q) use ($animalId) {
+            $q->where('animal_id', $animalId);
+        });
     }
 }

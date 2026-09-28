@@ -3,56 +3,73 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
-use App\Models\ComposicionRaza;
+use App\Http\Resources\Animal\ComposicionRazaResource;
+use App\Http\Middleware\Legacy\Animal\NormalizeIndexComposicionRaza;
+use App\Http\Middleware\Legacy\Animal\NormalizeShowComposicionRaza;
+use App\Http\Middleware\Legacy\Animal\NormalizeStoreComposicionRaza;
+use App\Http\Middleware\Legacy\Animal\NormalizeUpdateComposicionRaza;
+use App\Services\Animal\ComposicionRazaService;
 use Illuminate\Http\Request;
 use Illuminate\Http\Response;
 use Illuminate\Support\Facades\Validator;
+use Illuminate\Auth\Access\AuthorizationException;
+use Illuminate\Database\Eloquent\ModelNotFoundException;
+use Symfony\Component\HttpKernel\Exception\ConflictHttpException;
 
 class ComposicionRazaController extends Controller
 {
     /**
-     * Display a listing of composicion raza.
+     * Constructor del controlador.
+     * Inyecta el servicio de composición y registra los middlewares legacy por método.
+     *
+     * @param ComposicionRazaService $composicionService
+     */
+    public function __construct(
+        protected ComposicionRazaService $composicionService
+    ) {
+        $this->middleware(NormalizeIndexComposicionRaza::class)->only('index');
+        $this->middleware(NormalizeShowComposicionRaza::class)->only('show');
+        $this->middleware(NormalizeStoreComposicionRaza::class)->only('store');
+        $this->middleware(NormalizeUpdateComposicionRaza::class)->only('update');
+    }
+
+    /**
+     * Devuelve el listado filtrado de composiciones de raza.
+     *
+     * @param Request $request
+     * @return \Illuminate\Http\JsonResponse
      */
     public function index(Request $request)
     {
-        $query = ComposicionRaza::with(['finca', 'tipoAnimal']);
-
-        // Apply filters (removed fk_tipo_animal_id and fk_id_Finca filtering as requested)
-        if ($request->has('nombre')) {
-            $query->byName($request->nombre);
-        }
-
-        $composicionRazas = $query->paginate(15);
-
+        $filters = $request->only(['nombre', 'nopaginate']);
+        $paginator = $this->composicionService->listComposiciones($filters, $request->user());
+        
         return response()->json([
             'success' => true,
             'message' => 'Lista de composiciones de raza obtenida exitosamente',
-            'data' => $composicionRazas->items(),
-            'pagination' => [
-                'current_page' => $composicionRazas->currentPage(),
-                'last_page' => $composicionRazas->lastPage(),
-                'per_page' => $composicionRazas->perPage(),
-                'total' => $composicionRazas->total(),
-            ]
+            'data' => $this->formatCollection(ComposicionRazaResource::class, $paginator)
         ], Response::HTTP_OK);
     }
 
     /**
-     * Store a newly created composicion raza.
+     * Registra una nueva composición de raza.
+     *
+     * @param Request $request
+     * @return \Illuminate\Http\JsonResponse
      */
     public function store(Request $request)
     {
         $validator = Validator::make($request->all(), [
-            'Nombre' => 'required|string|max:30',
-            'Siglas' => 'nullable|string|max:6',
-            'Pelaje' => 'nullable|string|max:80',
-            'Proposito' => 'nullable|string|max:15',
-            'Tipo_Raza' => 'nullable|string|max:12',
-            'Origen' => 'nullable|string|max:60',
-            'Caracteristica_Especial' => 'nullable|string|max:80',
-            'Proporcion_Raza' => 'nullable|string|max:7',
-            'fk_id_Finca' => 'nullable|exists:finca,id_Finca',
-            'fk_tipo_animal_id' => 'nullable|exists:tipo_animal,tipo_animal_id',
+            'nombre'                  => 'required|string|max:30',
+            'siglas'                  => 'nullable|string|max:6',
+            'pelaje'                  => 'nullable|string|max:80',
+            'proposito'               => 'nullable|string|max:15',
+            'tipo_raza'               => 'nullable|string|max:12',
+            'origen'                  => 'nullable|string|max:60',
+            'caracteristica_especial' => 'nullable|string|max:80',
+            'proporcion_raza'         => 'nullable|string|max:7',
+            'finca_id'                => 'nullable|exists:fincas,id',
+            'tipo_animal_id'          => 'nullable|exists:tipo_animals,id',
         ]);
 
         if ($validator->fails()) {
@@ -63,96 +80,73 @@ class ComposicionRazaController extends Controller
             ], Response::HTTP_UNPROCESSABLE_ENTITY);
         }
 
-        $user = $request->user();
-
-        // Check permissions if finca is specified
-        if ($request->has('fk_id_Finca') && !$user->isAdmin()) {
-            $propietario = $user->propietario;
-            if (!$propietario) {
-                return response()->json([
-                    'success' => false,
-                    'message' => 'Usuario no tiene propietario asociado'
-                ], Response::HTTP_FORBIDDEN);
-            }
-
-            $finca = \App\Models\Finca::find($request->fk_id_Finca);
-            if (!$finca || $finca->id_Propietario != $propietario->id) {
-                return response()->json([
-                    'success' => false,
-                    'message' => 'No tiene permisos para asociar esta composición con la finca especificada'
-                ], Response::HTTP_FORBIDDEN);
-            }
+        try {
+            $composicion = $this->composicionService->createComposicion($request->all(), $request->user());
+            $composicion->load(['finca', 'tipoAnimal']);
+            
+            return response()->json([
+                'success' => true,
+                'message' => 'Composición de raza creada exitosamente',
+                'data' => $this->formatResource(ComposicionRazaResource::class, $composicion)
+            ], Response::HTTP_CREATED);
+        } catch (AuthorizationException $e) {
+            return response()->json([
+                'success' => false,
+                'message' => $e->getMessage()
+            ], Response::HTTP_FORBIDDEN);
         }
-
-        $composicionRaza = ComposicionRaza::create($request->all());
-        $composicionRaza->load(['finca', 'tipoAnimal']);
-
-        return response()->json([
-            'success' => true,
-            'message' => 'Composición de raza creada exitosamente',
-            'data' => $composicionRaza
-        ], Response::HTTP_CREATED);
     }
 
     /**
-     * Display the specified composicion raza.
+     * Devuelve el detalle de una composición de raza específica.
+     *
+     * @param Request $request
+     * @param int $id
+     * @return \Illuminate\Http\JsonResponse
      */
     public function show(Request $request, $id)
     {
-        $composicionRaza = ComposicionRaza::with(['finca', 'tipoAnimal', 'animales'])->find($id);
-
-        if (!$composicionRaza) {
+        try {
+            $composicion = $this->composicionService->getComposicionById((int)$id, $request->user());
+            
+            return response()->json([
+                'success' => true,
+                'message' => 'Composición de raza obtenida exitosamente',
+                'data' => $this->formatResource(ComposicionRazaResource::class, $composicion)
+            ], Response::HTTP_OK);
+        } catch (ModelNotFoundException $e) {
             return response()->json([
                 'success' => false,
                 'message' => 'Composición de raza no encontrada'
             ], Response::HTTP_NOT_FOUND);
+        } catch (AuthorizationException $e) {
+            return response()->json([
+                'success' => false,
+                'message' => $e->getMessage()
+            ], Response::HTTP_FORBIDDEN);
         }
-
-        $user = $request->user();
-
-        // Check permissions
-        if (!$user->isAdmin() && $composicionRaza->finca) {
-            $propietario = $user->propietario;
-            if (!$propietario || $composicionRaza->finca->id_Propietario != $propietario->id) {
-                return response()->json([
-                    'success' => false,
-                    'message' => 'No tiene permisos para ver esta composición de raza'
-                ], Response::HTTP_FORBIDDEN);
-            }
-        }
-
-        return response()->json([
-            'success' => true,
-            'message' => 'Composición de raza obtenida exitosamente',
-            'data' => $composicionRaza
-        ], Response::HTTP_OK);
     }
 
     /**
-     * Update the specified composicion raza.
+     * Actualiza los datos de una composición de raza.
+     *
+     * @param Request $request
+     * @param int $id
+     * @return \Illuminate\Http\JsonResponse
      */
     public function update(Request $request, $id)
     {
-        $composicionRaza = ComposicionRaza::find($id);
-
-        if (!$composicionRaza) {
-            return response()->json([
-                'success' => false,
-                'message' => 'Composición de raza no encontrada'
-            ], Response::HTTP_NOT_FOUND);
-        }
-
         $validator = Validator::make($request->all(), [
-            'Nombre' => 'sometimes|string|max:30',
-            'Siglas' => 'nullable|string|max:6',
-            'Pelaje' => 'nullable|string|max:80',
-            'Proposito' => 'nullable|string|max:15',
-            'Tipo_Raza' => 'nullable|string|max:12',
-            'Origen' => 'nullable|string|max:60',
-            'Caracteristica_Especial' => 'nullable|string|max:80',
-            'Proporcion_Raza' => 'nullable|string|max:7',
-            'fk_id_Finca' => 'nullable|exists:finca,id_Finca',
-            'fk_tipo_animal_id' => 'nullable|exists:tipo_animal,tipo_animal_id',
+            'nombre'                  => 'sometimes|string|max:30',
+            'siglas'                  => 'nullable|string|max:6',
+            'pelaje'                  => 'nullable|string|max:80',
+            'proposito'               => 'nullable|string|max:15',
+            'tipo_raza'               => 'nullable|string|max:12',
+            'origen'                  => 'nullable|string|max:60',
+            'caracteristica_especial' => 'nullable|string|max:80',
+            'proporcion_raza'         => 'nullable|string|max:7',
+            'finca_id'                => 'nullable|exists:fincas,id',
+            'tipo_animal_id'          => 'nullable|exists:tipo_animals,id',
         ]);
 
         if ($validator->fails()) {
@@ -163,69 +157,64 @@ class ComposicionRazaController extends Controller
             ], Response::HTTP_UNPROCESSABLE_ENTITY);
         }
 
-        $user = $request->user();
-
-        // Check permissions
-        if (!$user->isAdmin() && $composicionRaza->finca) {
-            $propietario = $user->propietario;
-            if (!$propietario || $composicionRaza->finca->id_Propietario != $propietario->id) {
-                return response()->json([
-                    'success' => false,
-                    'message' => 'No tiene permisos para actualizar esta composición de raza'
-                ], Response::HTTP_FORBIDDEN);
-            }
-        }
-
-        $composicionRaza->update($request->all());
-        $composicionRaza->load(['finca', 'tipoAnimal']);
-
-        return response()->json([
-            'success' => true,
-            'message' => 'Composición de raza actualizada exitosamente',
-            'data' => $composicionRaza
-        ], Response::HTTP_OK);
-    }
-
-    /**
-     * Remove the specified composicion raza.
-     */
-    public function destroy(Request $request, $id)
-    {
-        $composicionRaza = ComposicionRaza::find($id);
-
-        if (!$composicionRaza) {
+        try {
+            $composicion = $this->composicionService->updateComposicion((int)$id, $request->all(), $request->user());
+            $composicion->load(['finca', 'tipoAnimal']);
+            
+            return response()->json([
+                'success' => true,
+                'message' => 'Composición de raza actualizada exitosamente',
+                'data' => $this->formatResource(ComposicionRazaResource::class, $composicion)
+            ], Response::HTTP_OK);
+        } catch (ModelNotFoundException $e) {
             return response()->json([
                 'success' => false,
                 'message' => 'Composición de raza no encontrada'
             ], Response::HTTP_NOT_FOUND);
-        }
-
-        $user = $request->user();
-
-        // Check permissions
-        if (!$user->isAdmin() && $composicionRaza->finca) {
-            $propietario = $user->propietario;
-            if (!$propietario || $composicionRaza->finca->id_Propietario != $propietario->id) {
-                return response()->json([
-                    'success' => false,
-                    'message' => 'No tiene permisos para eliminar esta composición de raza'
-                ], Response::HTTP_FORBIDDEN);
-            }
-        }
-
-        // Check if there are animals using this composition
-        if ($composicionRaza->animales()->count() > 0) {
+        } catch (AuthorizationException $e) {
             return response()->json([
                 'success' => false,
-                'message' => 'No se puede eliminar la composición de raza porque tiene animales asociados'
+                'message' => $e->getMessage()
+            ], Response::HTTP_FORBIDDEN);
+        } catch (ConflictHttpException $e) {
+            return response()->json([
+                'success' => false,
+                'message' => $e->getMessage()
             ], Response::HTTP_CONFLICT);
         }
+    }
 
-        $composicionRaza->delete();
-
-        return response()->json([
-            'success' => true,
-            'message' => 'Composición de raza eliminada exitosamente'
-        ], Response::HTTP_OK);
+    /**
+     * Elimina una composición de raza.
+     *
+     * @param Request $request
+     * @param int $id
+     * @return \Illuminate\Http\JsonResponse
+     */
+    public function destroy(Request $request, $id)
+    {
+        try {
+            $this->composicionService->deleteComposicion((int)$id, $request->user());
+            
+            return response()->json([
+                'success' => true,
+                'message' => 'Composición de raza eliminada exitosamente'
+            ], Response::HTTP_OK);
+        } catch (ModelNotFoundException $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Composición de raza no encontrada'
+            ], Response::HTTP_NOT_FOUND);
+        } catch (AuthorizationException $e) {
+            return response()->json([
+                'success' => false,
+                'message' => $e->getMessage()
+            ], Response::HTTP_FORBIDDEN);
+        } catch (ConflictHttpException $e) {
+            return response()->json([
+                'success' => false,
+                'message' => $e->getMessage()
+            ], Response::HTTP_CONFLICT);
+        }
     }
 }

@@ -9,9 +9,6 @@ class CasaComercial extends Model
 {
     use HasFactory;
 
-    protected $table = 'casa_comercial';
-    protected $primaryKey = 'casa_id';
-
     protected $fillable = [
         'laboratorio',
         'marca_comercial',
@@ -22,26 +19,30 @@ class CasaComercial extends Model
         'activa' => 'boolean',
     ];
 
+    /**
+     * Obtener las vacunas asociadas a esta casa comercial.
+     */
     public function vacunas()
     {
         return $this->belongsToMany(
             Vacuna::class,
-            'vacuna_casa',
-            'vc_casa_id',
-            'vc_vacuna_id'
+            'casa_comercial_vacuna',
+            'casa_comercial_id',
+            'vacuna_id'
         )->withPivot('dosis_cantidad');
     }
 
-    public function dosis()
-    {
-        return $this->hasMany(Dosis::class, 'dosis_casa_id', 'casa_id');
-    }
-
+    /**
+     * Filtro para buscar por laboratorio.
+     */
     public function scopeByLaboratorio($query, $laboratorio)
     {
         return $query->where('laboratorio', 'like', "%{$laboratorio}%");
     }
 
+    /**
+     * Filtro para incluir solo las casas comerciales activas.
+     */
     public function scopeActivas($query)
     {
         return $query->where('activa', true);

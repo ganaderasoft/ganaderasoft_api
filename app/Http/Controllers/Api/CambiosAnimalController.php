@@ -3,81 +3,75 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
-use App\Models\CambiosAnimal;
+use App\Http\Resources\Animal\CambiosAnimalResource;
+use App\Http\Middleware\Legacy\Animal\NormalizeIndexCambiosAnimal;
+use App\Http\Middleware\Legacy\Animal\NormalizeShowCambiosAnimal;
+use App\Http\Middleware\Legacy\Animal\NormalizeStoreCambiosAnimal;
+use App\Http\Middleware\Legacy\Animal\NormalizeUpdateCambiosAnimal;
+use App\Services\Animal\CambiosAnimalService;
 use Illuminate\Http\Request;
 use Illuminate\Http\Response;
 use Illuminate\Support\Facades\Validator;
+use Illuminate\Auth\Access\AuthorizationException;
+use Illuminate\Database\Eloquent\ModelNotFoundException;
 
 class CambiosAnimalController extends Controller
 {
     /**
-     * Display a listing of cambios animal.
+     * Constructor del controlador.
+     * Inyecta el servicio de cambios y registra los middlewares legacy por método.
+     *
+     * @param CambiosAnimalService $cambiosService
+     */
+    public function __construct(
+        protected CambiosAnimalService $cambiosService
+    ) {
+        $this->middleware(NormalizeIndexCambiosAnimal::class)->only('index');
+        $this->middleware(NormalizeShowCambiosAnimal::class)->only('show');
+        $this->middleware(NormalizeStoreCambiosAnimal::class)->only('store');
+        $this->middleware(NormalizeUpdateCambiosAnimal::class)->only('update');
+    }
+
+    /**
+     * Devuelve el listado filtrado de cambios de animal.
+     *
+     * @param Request $request
+     * @return \Illuminate\Http\JsonResponse
      */
     public function index(Request $request)
     {
-        $user = $request->user();
-        
-        //$query = CambiosAnimal::with(['etapaAnimal.etapa', 'etapaAnimal.animal']);
-
-	$query = CambiosAnimal::with(['animal']);
-        // Apply filters
-        if ($request->has('animal_id')) {
-            $query->forAnimal($request->animal_id);
+        try {
+            $filters = $request->only(['animal_id', 'etapa_id', 'etapa_cambio', 'fecha_inicio', 'fecha_fin', 'nopaginate']);
+            $paginator = $this->cambiosService->listCambios($filters, $request->user());
+            
+            return response()->json([
+                'success' => true,
+                'message' => 'Lista de cambios de animal obtenida exitosamente',
+                'data' => $this->formatCollection(CambiosAnimalResource::class, $paginator)
+            ], Response::HTTP_OK);
+        } catch (AuthorizationException $e) {
+            return response()->json([
+                'success' => false,
+                'message' => $e->getMessage()
+            ], Response::HTTP_FORBIDDEN);
         }
-
-        if ($request->has('etapa_id')) {
-            $query->forEtapa($request->etapa_id);
-        }
-
-        if ($request->has('etapa_cambio')) {
-            $query->byEtapaCambio($request->etapa_cambio);
-        }
-
-        if ($request->has('fecha_inicio')) {
-            $endDate = $request->has('fecha_fin') ? $request->fecha_fin : null;
-            $query->byDateRange($request->fecha_inicio, $endDate);
-        }
-
-        // If user is not admin, only show cambios from their animals
-        if (!$user->isAdmin() && $user->isPropietario()) {
-            $propietario = $user->propietario;
-            if ($propietario) {
-                $query->whereHas('animal.rebano.finca', function ($q) use ($propietario) {
-                    $q->where('id_Propietario', $propietario->id);
-                });
-            }
-        }
-
-        $cambiosAnimal = $query->paginate(15);
-
-        return response()->json([
-            'success' => true,
-            'message' => 'Lista de cambios de animal obtenida exitosamente',
-            'data' => $cambiosAnimal->items(),
-            'pagination' => [
-                'current_page' => $cambiosAnimal->currentPage(),
-                'last_page' => $cambiosAnimal->lastPage(),
-                'per_page' => $cambiosAnimal->perPage(),
-                'total' => $cambiosAnimal->total(),
-            ]
-        ], Response::HTTP_OK);
     }
 
     /**
-     * Store a newly created cambios animal.
+     * Registra un nuevo cambio de animal.
+     *
+     * @param Request $request
+     * @return \Illuminate\Http\JsonResponse
      */
     public function store(Request $request)
     {
-        $user = $request->user();
-
         $validator = Validator::make($request->all(), [
-            'Fecha_Cambio' => 'nullable|date',
-            'Etapa_Cambio' => 'nullable|string|max:10',
-            'Peso' => 'required|numeric|min:0',
-            'Altura' => 'required|numeric|min:0',
-            'Comentario' => 'nullable|string|max:60',
-            'cambios_etapa_anid' => 'required|exists:animal,id_Animal',
-            'cambios_etapa_etid' => 'required|exists:etapa,etapa_id',
+            'fecha_cambio'    => 'nullable|date',
+            'etapa_cambio'    => 'nullable|string|max:10',
+            'peso'            => 'required|numeric|min:0',
+            'altura'          => 'required|numeric|min:0',
+            'comentario'      => 'nullable|string|max:60',
+            'animal_etapa_id' => 'required|exists:animal_etapa,id',
         ]);
 
         if ($validator->fails()) {
@@ -88,125 +82,82 @@ class CambiosAnimalController extends Controller
             ], Response::HTTP_UNPROCESSABLE_ENTITY);
         }
 
-        // Check if etapa_animal exists
-        $etapaAnimalExists = \DB::table('etapa_animal')
-            ->where('etan_animal_id', $request->cambios_etapa_anid)
-            ->where('etan_etapa_id', $request->cambios_etapa_etid)
-            ->exists();
-
-        if (!$etapaAnimalExists) {
+        try {
+            $cambio = $this->cambiosService->createCambio($request->all(), $request->user());
+            
+            return response()->json([
+                'success' => true,
+                'message' => 'Cambios de animal registrados exitosamente',
+                'data' => $this->formatResource(CambiosAnimalResource::class, $cambio)
+            ], Response::HTTP_CREATED);
+        } catch (AuthorizationException $e) {
             return response()->json([
                 'success' => false,
-                'message' => 'La relación etapa-animal no existe'
-            ], Response::HTTP_UNPROCESSABLE_ENTITY);
+                'message' => $e->getMessage()
+            ], Response::HTTP_FORBIDDEN);
         }
-
-        // Check permissions
-        if (!$user->isAdmin()) {
-            if ($user->isPropietario()) {
-                $animal = \App\Models\Animal::find($request->cambios_etapa_anid);
-                if (!$animal || $animal->rebano->finca->id_Propietario !== $user->propietario->id) {
-                    return response()->json([
-                        'success' => false,
-                        'message' => 'No tiene permisos para registrar cambios a este animal'
-                    ], Response::HTTP_FORBIDDEN);
-                }
-            } else {
-                return response()->json([
-                    'success' => false,
-                    'message' => 'No tiene permisos para registrar cambios de animal'
-                ], Response::HTTP_FORBIDDEN);
-            }
-        }
-
-        $cambiosAnimal = CambiosAnimal::create($request->all());
-        //$cambiosAnimal->load(['etapaAnimal.etapa', 'etapaAnimal.animal']);
-
-        return response()->json([
-            'success' => true,
-            'message' => 'Cambios de animal registrados exitosamente',
-            'data' => $cambiosAnimal
-        ], Response::HTTP_CREATED);
     }
 
     /**
-     * Display the specified cambios animal.
+     * Devuelve el detalle de un registro específico de cambios de animal.
+     *
+     * @param Request $request
+     * @param int $id
+     * @return \Illuminate\Http\JsonResponse
      */
     public function show(Request $request, $id)
     {
-        $user = $request->user();
-        $cambiosAnimal = CambiosAnimal::with(['etapaAnimal.etapa', 'etapaAnimal.animal'])->find($id);
-
-        if (!$cambiosAnimal) {
+        try {
+            $cambio = $this->cambiosService->getCambioById((int)$id, $request->user());
+            
+            return response()->json([
+                'success' => true,
+                'message' => 'Cambios de animal obtenidos exitosamente',
+                'data' => $this->formatResource(CambiosAnimalResource::class, $cambio)
+            ], Response::HTTP_OK);
+        } catch (ModelNotFoundException $e) {
             return response()->json([
                 'success' => false,
                 'message' => 'Cambios de animal no encontrados'
             ], Response::HTTP_NOT_FOUND);
+        } catch (AuthorizationException $e) {
+            return response()->json([
+                'success' => false,
+                'message' => $e->getMessage()
+            ], Response::HTTP_FORBIDDEN);
         }
-
-        // Check permissions
-        if (!$user->isAdmin()) {
-            if ($user->isPropietario()) {
-                if ($cambiosAnimal->etapaAnimal->animal->rebano->finca->id_Propietario !== $user->propietario->id) {
-                    return response()->json([
-                        'success' => false,
-                        'message' => 'No tiene permisos para ver estos cambios de animal'
-                    ], Response::HTTP_FORBIDDEN);
-                }
-            } else {
-                return response()->json([
-                    'success' => false,
-                    'message' => 'No tiene permisos para ver esta información'
-                ], Response::HTTP_FORBIDDEN);
-            }
-        }
-
-        return response()->json([
-            'success' => true,
-            'message' => 'Cambios de animal obtenidos exitosamente',
-            'data' => $cambiosAnimal
-        ], Response::HTTP_OK);
     }
 
     /**
-     * Update the specified cambios animal.
+     * Actualiza los datos de un registro de cambios de animal.
+     *
+     * @param Request $request
+     * @param int $id
+     * @return \Illuminate\Http\JsonResponse
      */
     public function update(Request $request, $id)
     {
-        $user = $request->user();
-        $cambiosAnimal = CambiosAnimal::find($id);
-
-        if (!$cambiosAnimal) {
+        try {
+            // Buscamos para validar permisos antes de validar el body
+            $this->cambiosService->getCambioById((int)$id, $request->user());
+        } catch (ModelNotFoundException $e) {
             return response()->json([
                 'success' => false,
                 'message' => 'Cambios de animal no encontrados'
             ], Response::HTTP_NOT_FOUND);
-        }
-
-        // Check permissions
-        if (!$user->isAdmin()) {
-            if ($user->isPropietario()) {
-                $cambiosAnimal->load(['etapaAnimal.animal.rebano.finca']);
-                if ($cambiosAnimal->etapaAnimal->animal->rebano->finca->id_Propietario !== $user->propietario->id) {
-                    return response()->json([
-                        'success' => false,
-                        'message' => 'No tiene permisos para editar estos cambios de animal'
-                    ], Response::HTTP_FORBIDDEN);
-                }
-            } else {
-                return response()->json([
-                    'success' => false,
-                    'message' => 'No tiene permisos para editar cambios de animal'
-                ], Response::HTTP_FORBIDDEN);
-            }
+        } catch (AuthorizationException $e) {
+            return response()->json([
+                'success' => false,
+                'message' => $e->getMessage()
+            ], Response::HTTP_FORBIDDEN);
         }
 
         $validator = Validator::make($request->all(), [
-            'Fecha_Cambio' => 'sometimes|date',
-            'Etapa_Cambio' => 'sometimes|string|max:10',
-            'Peso' => 'sometimes|numeric|min:0',
-            'Altura' => 'sometimes|numeric|min:0',
-            'Comentario' => 'nullable|string|max:60',
+            'fecha_cambio' => 'sometimes|date',
+            'etapa_cambio' => 'sometimes|string|max:10',
+            'peso'         => 'sometimes|numeric|min:0',
+            'altura'       => 'sometimes|numeric|min:0',
+            'comentario'   => 'nullable|string|max:60',
         ]);
 
         if ($validator->fails()) {
@@ -217,54 +168,48 @@ class CambiosAnimalController extends Controller
             ], Response::HTTP_UNPROCESSABLE_ENTITY);
         }
 
-        $cambiosAnimal->update($request->all());
-        $cambiosAnimal->load(['etapaAnimal.etapa', 'etapaAnimal.animal']);
-
-        return response()->json([
-            'success' => true,
-            'message' => 'Cambios de animal actualizados exitosamente',
-            'data' => $cambiosAnimal
-        ], Response::HTTP_OK);
+        try {
+            $updated = $this->cambiosService->updateCambio((int)$id, $request->all(), $request->user());
+            
+            return response()->json([
+                'success' => true,
+                'message' => 'Cambios de animal actualizados exitosamente',
+                'data' => $this->formatResource(CambiosAnimalResource::class, $updated)
+            ], Response::HTTP_OK);
+        } catch (AuthorizationException $e) {
+            return response()->json([
+                'success' => false,
+                'message' => $e->getMessage()
+            ], Response::HTTP_FORBIDDEN);
+        }
     }
 
     /**
-     * Remove the specified cambios animal.
+     * Elimina un registro de cambios de animal.
+     *
+     * @param Request $request
+     * @param int $id
+     * @return \Illuminate\Http\JsonResponse
      */
     public function destroy(Request $request, $id)
     {
-        $user = $request->user();
-        $cambiosAnimal = CambiosAnimal::find($id);
-
-        if (!$cambiosAnimal) {
+        try {
+            $this->cambiosService->deleteCambio((int)$id, $request->user());
+            
+            return response()->json([
+                'success' => true,
+                'message' => 'Cambios de animal eliminados exitosamente'
+            ], Response::HTTP_OK);
+        } catch (ModelNotFoundException $e) {
             return response()->json([
                 'success' => false,
                 'message' => 'Cambios de animal no encontrados'
             ], Response::HTTP_NOT_FOUND);
+        } catch (AuthorizationException $e) {
+            return response()->json([
+                'success' => false,
+                'message' => $e->getMessage()
+            ], Response::HTTP_FORBIDDEN);
         }
-
-        // Check permissions
-        if (!$user->isAdmin()) {
-            if ($user->isPropietario()) {
-                $cambiosAnimal->load(['etapaAnimal.animal.rebano.finca']);
-                if ($cambiosAnimal->etapaAnimal->animal->rebano->finca->id_Propietario !== $user->propietario->id) {
-                    return response()->json([
-                        'success' => false,
-                        'message' => 'No tiene permisos para eliminar estos cambios de animal'
-                    ], Response::HTTP_FORBIDDEN);
-                }
-            } else {
-                return response()->json([
-                    'success' => false,
-                    'message' => 'No tiene permisos para eliminar cambios de animal'
-                ], Response::HTTP_FORBIDDEN);
-            }
-        }
-
-        $cambiosAnimal->delete();
-
-        return response()->json([
-            'success' => true,
-            'message' => 'Cambios de animal eliminados exitosamente'
-        ], Response::HTTP_OK);
     }
 }

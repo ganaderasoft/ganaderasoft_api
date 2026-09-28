@@ -3,41 +3,63 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
-use App\Models\TipoAnimal;
+use App\Http\Resources\Animal\TipoAnimalResource;
+use App\Http\Middleware\Legacy\Animal\NormalizeIndexTipoAnimal;
+use App\Http\Middleware\Legacy\Animal\NormalizeShowTipoAnimal;
+use App\Http\Middleware\Legacy\Animal\NormalizeStoreTipoAnimal;
+use App\Http\Middleware\Legacy\Animal\NormalizeUpdateTipoAnimal;
+use App\Services\Animal\TipoAnimalService;
 use Illuminate\Http\Request;
 use Illuminate\Http\Response;
 use Illuminate\Support\Facades\Validator;
+use Illuminate\Auth\Access\AuthorizationException;
+use Illuminate\Database\Eloquent\ModelNotFoundException;
 
 class TipoAnimalController extends Controller
 {
     /**
-     * Display a listing of tipos de animal.
+     * Constructor del controlador.
+     * Inyecta el servicio de especies y registra los middlewares legacy por método.
+     *
+     * @param TipoAnimalService $tipoAnimalService
      */
-    public function index(Request $request)
-    {
-        $query = TipoAnimal::query();
-        
-        // Apply search filter
-        if ($request->has('search')) {
-            $query->byName($request->search);
-        }
-        
-        $tiposAnimal = $query->paginate(15);
-
-        return response()->json([
-            'success' => true,
-            'message' => 'Lista de tipos de animal',
-            'data' => $tiposAnimal
-        ]);
+    public function __construct(
+        protected TipoAnimalService $tipoAnimalService
+    ) {
+        $this->middleware(NormalizeIndexTipoAnimal::class)->only('index');
+        $this->middleware(NormalizeShowTipoAnimal::class)->only('show');
+        $this->middleware(NormalizeStoreTipoAnimal::class)->only('store');
+        $this->middleware(NormalizeUpdateTipoAnimal::class)->only('update');
     }
 
     /**
-     * Store a newly created tipo de animal.
+     * Devuelve el listado de especies (tipos de animal).
+     *
+     * @param Request $request
+     * @return \Illuminate\Http\JsonResponse
+     */
+    public function index(Request $request)
+    {
+        $filters = $request->only(['search', 'nopaginate']);
+        $paginator = $this->tipoAnimalService->listTipos($filters, $request->user());
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Lista de tipos de animal obtenida exitosamente',
+            'data' => $this->formatCollection(TipoAnimalResource::class, $paginator)
+        ], Response::HTTP_OK);
+    }
+
+    /**
+     * Registra una nueva especie en el catálogo.
+     *
+     * @param Request $request
+     * @return \Illuminate\Http\JsonResponse
      */
     public function store(Request $request)
     {
         $validator = Validator::make($request->all(), [
-            'tipo_animal_nombre' => 'required|string|max:40|regex:/^[a-zA-Z0-9áéíóúÁÉÍÓÚñÑ ]+$/'
+            'nombre' => 'required|string|max:40|regex:/^[a-zA-Z0-9áéíóúÁÉÍÓÚñÑ ]+$/'
         ]);
 
         if ($validator->fails()) {
@@ -48,64 +70,57 @@ class TipoAnimalController extends Controller
             ], Response::HTTP_UNPROCESSABLE_ENTITY);
         }
 
-        $user = $request->user();
-        
-        // Only admin can create tipos de animal
-        if (!$user->isAdmin()) {
+        try {
+            $tipoAnimal = $this->tipoAnimalService->createTipo($request->all(), $request->user());
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Tipo de animal creado exitosamente',
+                'data' => $this->formatResource(TipoAnimalResource::class, $tipoAnimal)
+            ], Response::HTTP_CREATED);
+        } catch (AuthorizationException $e) {
             return response()->json([
                 'success' => false,
-                'message' => 'No tiene permisos para crear tipos de animal'
+                'message' => $e->getMessage()
             ], Response::HTTP_FORBIDDEN);
         }
-
-        $tipoAnimal = TipoAnimal::create([
-            'tipo_animal_nombre' => $request->tipo_animal_nombre
-        ]);
-
-        return response()->json([
-            'success' => true,
-            'message' => 'Tipo de animal creado exitosamente',
-            'data' => $tipoAnimal
-        ], Response::HTTP_CREATED);
     }
 
     /**
-     * Display the specified tipo de animal.
+     * Devuelve el detalle de una especie específica.
+     *
+     * @param int $id
+     * @return \Illuminate\Http\JsonResponse
      */
     public function show(Request $request, $id)
     {
-        $tipoAnimal = TipoAnimal::find($id);
+        try {
+            $tipoAnimal = $this->tipoAnimalService->getTipoById((int)$id, $request->user());
 
-        if (!$tipoAnimal) {
+            return response()->json([
+                'success' => true,
+                'message' => 'Tipo de animal obtenido exitosamente',
+                'data' => $this->formatResource(TipoAnimalResource::class, $tipoAnimal)
+            ], Response::HTTP_OK);
+        } catch (ModelNotFoundException $e) {
             return response()->json([
                 'success' => false,
                 'message' => 'Tipo de animal no encontrado'
             ], Response::HTTP_NOT_FOUND);
         }
-
-        return response()->json([
-            'success' => true,
-            'message' => 'Detalle de tipo de animal',
-            'data' => $tipoAnimal
-        ]);
     }
 
     /**
-     * Update the specified tipo de animal.
+     * Actualiza los datos de una especie.
+     *
+     * @param Request $request
+     * @param int $id
+     * @return \Illuminate\Http\JsonResponse
      */
     public function update(Request $request, $id)
     {
-        $tipoAnimal = TipoAnimal::find($id);
-
-        if (!$tipoAnimal) {
-            return response()->json([
-                'success' => false,
-                'message' => 'Tipo de animal no encontrado'
-            ], Response::HTTP_NOT_FOUND);
-        }
-
         $validator = Validator::make($request->all(), [
-            'tipo_animal_nombre' => 'sometimes|string|max:40|regex:/^[a-zA-Z0-9áéíóúÁÉÍÓÚñÑ ]+$/'
+            'nombre' => 'required|string|max:40|regex:/^[a-zA-Z0-9áéíóúÁÉÍÓÚñÑ ]+$/'
         ]);
 
         if ($validator->fails()) {
@@ -116,54 +131,53 @@ class TipoAnimalController extends Controller
             ], Response::HTTP_UNPROCESSABLE_ENTITY);
         }
 
-        $user = $request->user();
-        
-        // Only admin can update tipos de animal
-        if (!$user->isAdmin()) {
+        try {
+            $tipoAnimal = $this->tipoAnimalService->updateTipo((int)$id, $request->all(), $request->user());
+
             return response()->json([
-                'success' => false,
-                'message' => 'No tiene permisos para actualizar tipos de animal'
-            ], Response::HTTP_FORBIDDEN);
-        }
-
-        $tipoAnimal->update($request->only(['tipo_animal_nombre']));
-
-        return response()->json([
-            'success' => true,
-            'message' => 'Tipo de animal actualizado exitosamente',
-            'data' => $tipoAnimal
-        ]);
-    }
-
-    /**
-     * Remove the specified tipo de animal.
-     */
-    public function destroy(Request $request, $id)
-    {
-        $tipoAnimal = TipoAnimal::find($id);
-
-        if (!$tipoAnimal) {
+                'success' => true,
+                'message' => 'Tipo de animal actualizado exitosamente',
+                'data' => $this->formatResource(TipoAnimalResource::class, $tipoAnimal)
+            ], Response::HTTP_OK);
+        } catch (ModelNotFoundException $e) {
             return response()->json([
                 'success' => false,
                 'message' => 'Tipo de animal no encontrado'
             ], Response::HTTP_NOT_FOUND);
-        }
-
-        $user = $request->user();
-        
-        // Only admin can delete tipos de animal
-        if (!$user->isAdmin()) {
+        } catch (AuthorizationException $e) {
             return response()->json([
                 'success' => false,
-                'message' => 'No tiene permisos para eliminar tipos de animal'
+                'message' => $e->getMessage()
             ], Response::HTTP_FORBIDDEN);
         }
+    }
 
-        $tipoAnimal->delete();
+    /**
+     * Elimina una especie del catálogo.
+     *
+     * @param Request $request
+     * @param int $id
+     * @return \Illuminate\Http\JsonResponse
+     */
+    public function destroy(Request $request, $id)
+    {
+        try {
+            $this->tipoAnimalService->deleteTipo((int)$id, $request->user());
 
-        return response()->json([
-            'success' => true,
-            'message' => 'Tipo de animal eliminado exitosamente'
-        ]);
+            return response()->json([
+                'success' => true,
+                'message' => 'Tipo de animal eliminado exitosamente'
+            ], Response::HTTP_OK);
+        } catch (ModelNotFoundException $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Tipo de animal no encontrado'
+            ], Response::HTTP_NOT_FOUND);
+        } catch (AuthorizationException $e) {
+            return response()->json([
+                'success' => false,
+                'message' => $e->getMessage()
+            ], Response::HTTP_FORBIDDEN);
+        }
     }
 }

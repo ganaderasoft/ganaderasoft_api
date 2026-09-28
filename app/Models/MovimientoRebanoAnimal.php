@@ -9,23 +9,27 @@ class MovimientoRebanoAnimal extends Model
 {
     use HasFactory;
 
-    protected $table = 'movimiento_rebano_animal';
-    protected $primaryKey = null;
-    public $incrementing = false;
+    protected $table = 'animal_movimiento_rebano';
 
     protected $fillable = [
-        'id_Animal',
-        'id_Movimiento',
-        'Estado',
+        'animal_id',
+        'movimiento_rebano_id',
+        'estado',
     ];
 
+    /**
+     * Obtener animal asociado/a.
+     */
     public function animal()
     {
-        return $this->belongsTo(Animal::class, 'id_Animal', 'id_Animal');
+        return $this->belongsTo(Animal::class, 'animal_id', 'id');
     }
 
+    /**
+     * Obtener movimiento asociado/a.
+     */
     public function movimiento()
     {
-        return $this->belongsTo(MovimientoRebano::class, 'id_Movimiento', 'id_Movimiento');
+        return $this->belongsTo(MovimientoRebano::class, 'movimiento_rebano_id', 'id');
     }
 }

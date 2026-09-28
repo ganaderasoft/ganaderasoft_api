@@ -7,75 +7,42 @@ use Illuminate\Support\Facades\Route;
 | Web Routes
 |--------------------------------------------------------------------------
 |
-| Here is where you can register web routes for your application. These
-| routes are loaded by the RouteServiceProvider and all of them will
-| be assigned to the "web" middleware group. Make something great!
+| Este archivo maneja las peticiones dirigidas a la raíz del servidor web
+| (sin el prefijo /api). Como GanaderaSoft opera exclusivamente como una
+| API REST, la ruta raíz retorna información detallada sobre el servicio,
+| versión y guía de uso para realizar peticiones a los endpoints de la API.
 |
 */
 
 Route::get('/', function () {
     return response()->json([
-        'message' => 'GanaderaSoft API Gateway',
-        'version' => '1.0.0',
-        'documentation' => '/api/health'
-    ]);
-});
-
-// Test API routes directly on web for testing
-Route::get('/api/health', function () {
-    return response()->json([
-        'success' => true,
-        'message' => 'GanaderaSoft API is running',
-        'version' => '1.0.0',
-        'timestamp' => now()->toISOString()
-    ]);
-});
-
-// Test routes to demonstrate API functionality
-Route::prefix('api')->group(function () {
-    Route::get('/test/register', function () {
-        return response()->json([
-            'success' => true,
-            'message' => 'User registration endpoint is working',
-            'required_fields' => ['name', 'email', 'password', 'type_user'],
-            'allowed_user_types' => ['admin', 'propietario', 'tecnico'],
-            'method' => 'POST',
-            'endpoint' => '/api/auth/register'
-        ]);
-    });
-    
-    Route::get('/test/finca', function () {
-        return response()->json([
-            'success' => true,
-            'message' => 'Finca CRUD endpoints are working',
-            'endpoints' => [
-                'GET /api/fincas' => 'List all fincas',
-                'POST /api/fincas' => 'Create new finca',
-                'GET /api/fincas/{id}' => 'Get finca details',
-                'PUT /api/fincas/{id}' => 'Update finca',
-                'DELETE /api/fincas/{id}' => 'Delete finca'
+        'service'     => 'GanaderaSoft API Core',
+        'version'     => '2.0.0',
+        'status'      => 'operational',
+        'description' => 'API REST para la gestión integral de operaciones ganaderas pecuarias.',
+        'instructions' => [
+            'base_url'         => url('/api'),
+            'required_headers' => [
+                'Accept'        => 'application/json',
+                'Content-Type'  => 'application/json',
+                'X-API-VERSION' => '2',
+                'Authorization' => 'Bearer <token> (requerido para endpoints protegidos)',
             ],
-            'required_fields' => ['Nombre', 'Explotacion_Tipo', 'id_Propietario'],
-            'authentication' => 'Bearer token required'
-        ]);
-    });
-    
-    Route::get('/test/database', function () {
-        try {
-            \Illuminate\Support\Facades\DB::connection()->getPdo();
-            return response()->json([
-                'success' => true,
-                'message' => 'Database connection successful',
-                'driver' => config('database.default'),
-                'host' => config('database.connections.mysql.host'),
-                'database' => config('database.connections.mysql.database')
-            ]);
-        } catch (\Exception $e) {
-            return response()->json([
-                'success' => false,
-                'message' => 'Database connection failed',
-                'error' => $e->getMessage()
-            ], 500);
-        }
-    });
+            'quickstart' => [
+                'login'    => 'POST /api/auth/login con credenciales { "login": "<email|cedula>", "password": "<clave>" }',
+                'token'    => 'Usar el token devuelto en la cabecera "Authorization: Bearer <token>"',
+                'requests' => 'Todas las rutas de recursos y consultas se encuentran bajo el prefijo /api/...',
+            ],
+        ],
+        'endpoints' => [
+            'health'   => url('/api/health'),
+            'login'    => url('/api/auth/login'),
+            'user'     => url('/api/user'),
+            'profile'  => url('/api/profile'),
+            'fincas'   => url('/api/fincas'),
+            'animales' => url('/api/animales'),
+            'rebanos'  => url('/api/rebanos'),
+        ],
+        'timestamp' => now()->toIso8601String(),
+    ], 200, [], JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES);
 });

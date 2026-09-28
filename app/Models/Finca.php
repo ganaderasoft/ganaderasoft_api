@@ -9,13 +9,10 @@ class Finca extends Model
 {
     use HasFactory;
 
-    protected $table = 'finca';
-    protected $primaryKey = 'id_Finca';
-
     protected $fillable = [
-        'id_Propietario',
-        'Nombre',
-        'Explotacion_Tipo',
+        'propietario_id',
+        'nombre',
+        'explotacion_tipo',
         'archivado',
     ];
 
@@ -24,23 +21,25 @@ class Finca extends Model
     ];
 
     /**
-     * Get the propietario that owns the finca.
+     * Obtener el/la propietario que posee este/a finca.
      */
     public function propietario()
     {
-        return $this->belongsTo(Propietario::class, 'id_Propietario', 'id');
+        return $this->belongsTo(Propietario::class, 'propietario_id', 'id');
     }
 
     /**
-     * Get the user that owns the finca through propietario.
+     * Obtener los usuarios asociados a esta finca.
      */
-    public function user()
+    public function users()
     {
-        return $this->hasOneThrough(User::class, Propietario::class, 'id', 'id', 'id_Propietario', 'id');
+        return $this->belongsToMany(User::class, 'finca_user')
+            ->withPivot(['access_level', 'is_default', 'status'])
+            ->withTimestamps();
     }
 
     /**
-     * Scope a query to only include active fincas.
+     * Filtro para incluir solo fincas activos/as.
      */
     public function scopeActive($query)
     {
@@ -48,50 +47,66 @@ class Finca extends Model
     }
 
     /**
-     * Scope a query to only include fincas of a specific propietario.
+     * Filtro para incluir fincas de un/a propietario específico/a.
      */
     public function scopeForPropietario($query, $propietarioId)
     {
-        return $query->where('id_Propietario', $propietarioId);
+        return $query->where('propietario_id', $propietarioId);
     }
 
     /**
-     * Get the inventario bufalo for the finca.
+     * Obtener el/la inventario bufalo para este/a finca.
      */
     public function inventariosBufalo()
     {
-        return $this->hasMany(InventarioBufalo::class, 'id_Finca', 'id_Finca');
+        return $this->hasMany(InventarioBufalo::class, 'finca_id', 'id');
     }
 
     /**
-     * Get the rebanos for the finca.
+     * Obtener el/la rebanos para este/a finca.
      */
     public function rebanos()
     {
-        return $this->hasMany(Rebano::class, 'id_Finca', 'id_Finca');
+        return $this->hasMany(Rebano::class, 'finca_id', 'id');
     }
 
     /**
-     * Get all animals through rebanos.
+     * Obtener las afiliaciones asociadas a esta finca.
+     */
+    public function afiliaciones()
+    {
+        return $this->hasMany(Afiliacion::class, 'finca_id', 'id');
+    }
+
+    /**
+     * Obtener los hierros asociados a esta finca.
+     */
+    public function hierros()
+    {
+        return $this->hasMany(Hierro::class, 'finca_id', 'id');
+    }
+
+    /**
+     * Obtener todos los animales a través de los rebaños.
      */
     public function animales()
     {
-        return $this->hasManyThrough(Animal::class, Rebano::class, 'id_Finca', 'id_Rebano', 'id_Finca', 'id_Rebano');
+        return $this->hasManyThrough(Animal::class, Rebano::class, 'finca_id', 'rebano_id', 'id', 'id');
     }
 
     /**
-     * Get the personal for the finca.
+     * Obtener el/la personal para este/a finca.
      */
     public function personalFinca()
     {
-        return $this->hasMany(PersonalFinca::class, 'id_Finca', 'id_Finca');
+        return $this->hasMany(PersonalFinca::class, 'finca_id', 'id');
     }
 
     /**
-     * Get the terreno for the finca.
+     * Obtener el/la terreno para este/a finca.
      */
     public function terreno()
     {
-        return $this->hasOne(Terreno::class, 'id_Finca', 'id_Finca');
+        return $this->hasOne(Terreno::class, 'finca_id', 'id');
     }
 }

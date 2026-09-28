@@ -1,0 +1,27 @@
+# Ignorar dependencias locales (se instalan en el contenedor o se mapean por volumen en dev)
+/vendor/
+/node_modules/
+
+# Ignorar archivos de Vite que pudiesen existir por error en el backend
+/public/hot
+
+# Ignorar el contenido de las carpetas de almacenamiento, pero NO las carpetas
+/public/storage
+/storage/*.key
+/storage/logs/*
+!/storage/logs/.gitignore
+/storage/framework/cache/*
+!/storage/framework/cache/.gitignore
+/storage/framework/sessions/*
+!/storage/framework/sessions/.gitignore
+/storage/framework/views/*
+!/storage/framework/views/.gitignore
+
+# Ignorar variables de entorno locales
+/.env
+/.env.*
+
+# Ignorar carpetas de Git y editores de código
+/.git/
+/.idea/
+/.vscode/

@@ -12,11 +12,23 @@ class DatabaseSeeder extends Seeder
      */
     public function run(): void
     {
-        // \App\Models\User::factory(10)->create();
+        $this->call([
+            // 1. Core de Seguridad
+            PermissionSeeder::class,
+            RoleSeeder::class,
+            AdminUserSeeder::class,
 
-        // \App\Models\User::factory()->create([
-        //     'name' => 'Test User',
-        //     'email' => 'test@example.com',
-        // ]);
+            // 2. Catálogos del Sistema (No dependen del usuario)
+            TipoAnimalSeeder::class,
+            TipoTrabajadorSeeder::class,
+            EstadoSaludSeeder::class,
+            EtapaSeeder::class,
+            ComposicionRazaSeeder::class,
+            
+            // 3. Catálogos Reproductivos / Sanidad
+            DiaPalpacionSeeder::class,
+            FoliculoSeeder::class,
+            SanidadSeeder::class,
+        ]);
     }
 }

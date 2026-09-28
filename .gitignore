@@ -20,6 +20,7 @@
 .env
 .env.*
 !.env.example
+!.env.dev
 
 # Testing
 .phpunit.result.cache

@@ -9,66 +9,62 @@ class EstadoAnimal extends Model
 {
     use HasFactory;
 
-    protected $table = 'estado_animal';
-    protected $primaryKey = 'esan_id';
-    
-    // This table doesn't have standard timestamps
-    public $timestamps = false;
+    protected $table = 'animal_estado_salud';
 
     protected $fillable = [
-        'esan_fecha_ini',
-        'esan_fecha_fin',
-        'esan_fk_estado_id',
-        'esan_fk_id_animal',
+        'animal_id',
+        'estado_salud_id',
+        'fecha_ini',
+        'fecha_fin',
     ];
 
     protected $casts = [
-        'esan_fecha_ini' => 'date',
-        'esan_fecha_fin' => 'date',
+        'fecha_ini' => 'date',
+        'fecha_fin' => 'date',
     ];
 
     /**
-     * Get the animal that has this estado.
+     * Obtener el/la animal that has this estado.
      */
     public function animal()
     {
-        return $this->belongsTo(Animal::class, 'esan_fk_id_animal', 'id_Animal');
+        return $this->belongsTo(Animal::class, 'animal_id', 'id');
     }
 
     /**
-     * Get the estado salud for this estado animal.
+     * Obtener el/la estado salud for this estado animal.
      */
     public function estadoSalud()
     {
-        return $this->belongsTo(EstadoSalud::class, 'esan_fk_estado_id', 'estado_id');
+        return $this->belongsTo(EstadoSalud::class, 'estado_salud_id', 'id');
     }
 
     /**
-     * Scope a query to only include active estados (no end date).
+     * Filtro para incluir solo estados (no end date) activos/as.
      */
     public function scopeActive($query)
     {
-        return $query->whereNull('esan_fecha_fin');
+        return $query->whereNull('fecha_fin');
     }
 
     /**
-     * Scope a query to only include estados for a specific animal.
+     * Filtro para incluir solo estados for a specific animal.
      */
     public function scopeForAnimal($query, $animalId)
     {
-        return $query->where('esan_fk_id_animal', $animalId);
+        return $query->where('animal_id', $animalId);
     }
 
     /**
-     * Scope a query to filter by estado salud.
+     * Filtro para filtrar por estado salud.
      */
     public function scopeByEstado($query, $estadoId)
     {
-        return $query->where('esan_fk_estado_id', $estadoId);
+        return $query->where('estado_salud_id', $estadoId);
     }
 
     /**
-     * Check if the estado is currently active.
+     * Verificar si el estado está activo actualmente.
      */
     public function isActive()
     {

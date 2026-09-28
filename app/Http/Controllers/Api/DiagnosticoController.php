@@ -3,122 +3,158 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
-use App\Models\Diagnostico;
+use App\Http\Resources\Sanidad\DiagnosticoResource;
+use App\Http\Middleware\Legacy\Sanidad\NormalizeIndexDiagnostico;
+use App\Http\Middleware\Legacy\Sanidad\NormalizeShowDiagnostico;
+use App\Http\Middleware\Legacy\Sanidad\NormalizeStoreDiagnostico;
+use App\Http\Middleware\Legacy\Sanidad\NormalizeUpdateDiagnostico;
+use App\Services\Sanidad\DiagnosticoService;
 use Illuminate\Http\Request;
 use Illuminate\Http\Response;
-use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Validator;
+use Illuminate\Database\Eloquent\ModelNotFoundException;
+use Illuminate\Auth\Access\AuthorizationException;
 
 class DiagnosticoController extends Controller
 {
+    public function __construct(
+        protected DiagnosticoService $diagnosticoService
+    ) {
+        $this->middleware(NormalizeIndexDiagnostico::class)->only('index');
+        $this->middleware(NormalizeShowDiagnostico::class)->only('show');
+        $this->middleware(NormalizeStoreDiagnostico::class)->only('store');
+        $this->middleware(NormalizeUpdateDiagnostico::class)->only('update');
+    }
+
     public function index(Request $request)
     {
-        $user = $request->user();
-        $query = Diagnostico::with('animal', 'etapa', 'tratamientos');
-
-        if ($request->has('animal_id')) {
-            $query->forAnimal($request->animal_id);
-        }
-        if ($request->has('tipo')) {
-            $query->byTipo($request->tipo);
-        }
-        if ($request->has('fecha_inicio')) {
-            $query->byDateRange($request->fecha_inicio, $request->get('fecha_fin'));
-        }
-
-        if (!$user->isAdmin() && $user->isPropietario()) {
-            $propietario = $user->propietario;
-            if ($propietario) {
-                $query->whereHas('animal.rebano.finca', function ($q) use ($propietario) {
-                    $q->where('id_Propietario', $propietario->id);
-                });
-            }
-        }
-
-        $records = $query->paginate(15);
+        $filters = $request->only(['animal_id', 'tipo', 'fecha_inicio', 'fecha_fin', 'nopaginate']);
+        
+        $records = $this->diagnosticoService->getPaginatedDiagnosticos($filters, $request->user());
 
         return response()->json([
-            'success'    => true,
-            'message'    => 'Diagnósticos',
-            'data'       => $records->items(),
-            'pagination' => [
-                'current_page' => $records->currentPage(),
-                'last_page'    => $records->lastPage(),
-                'per_page'     => $records->perPage(),
-                'total'        => $records->total(),
-            ],
-        ]);
+            'success' => true,
+            'message' => 'Diagnósticos obtenidos exitosamente',
+            'data'    => $this->formatCollection(DiagnosticoResource::class, $records),
+        ], Response::HTTP_OK);
     }
 
     public function store(Request $request)
     {
         $validator = Validator::make($request->all(), [
-            'diagnostico_descripcion'  => 'nullable|string',
-            'diagnostico_tipo'         => 'nullable|string|max:30',
-            'diagnostico_fecha'        => 'nullable|date',
-            'fk_etapa_animal_anid'     => 'required|exists:animal,id_Animal',
-            'fk_etapa_animal_etid'     => 'required|exists:etapa,etapa_id',
+            'descripcion'     => 'nullable|string',
+            'tipo'            => 'nullable|string|max:30',
+            'fecha'           => 'nullable|date',
+            'animal_etapa_id' => 'required_without_all:animal_id,etapa_id|exists:animal_etapa,id',
+            'animal_id'       => 'required_without:animal_etapa_id|exists:animals,id',
+            'etapa_id'        => 'required_without:animal_etapa_id|exists:etapas,id',
         ]);
 
         if ($validator->fails()) {
-            return response()->json(['success' => false, 'errors' => $validator->errors()], Response::HTTP_UNPROCESSABLE_ENTITY);
+            return response()->json([
+                'success' => false, 
+                'message' => 'Datos de validación incorrectos',
+                'errors'  => $validator->errors()
+            ], Response::HTTP_UNPROCESSABLE_ENTITY);
         }
 
-        $etapaAnimalExists = DB::table('etapa_animal')
-            ->where('etan_animal_id', $request->fk_etapa_animal_anid)
-            ->where('etan_etapa_id', $request->fk_etapa_animal_etid)
-            ->exists();
+        try {
+            $diagnostico = $this->diagnosticoService->createDiagnostico($request->only([
+                'descripcion', 'tipo', 'fecha', 'animal_etapa_id', 'animal_id', 'etapa_id'
+            ]), $request->user());
 
-        if (!$etapaAnimalExists) {
-            return response()->json(['success' => false, 'message' => 'La relación etapa-animal no existe'], Response::HTTP_UNPROCESSABLE_ENTITY);
+            return response()->json([
+                'success' => true, 
+                'message' => 'Diagnóstico registrado exitosamente', 
+                'data'    => $this->formatResource(DiagnosticoResource::class, $diagnostico)
+            ], Response::HTTP_CREATED);
+        } catch (AuthorizationException $e) {
+            return response()->json([
+                'success' => false,
+                'message' => $e->getMessage()
+            ], Response::HTTP_FORBIDDEN);
         }
-
-        $diagnostico = Diagnostico::create($request->only([
-            'diagnostico_descripcion', 'diagnostico_tipo', 'diagnostico_fecha',
-            'fk_etapa_animal_anid', 'fk_etapa_animal_etid',
-        ]));
-
-        return response()->json(['success' => true, 'message' => 'Diagnóstico registrado', 'data' => $diagnostico->load('animal')], Response::HTTP_CREATED);
     }
 
     public function show($id)
     {
-        $diagnostico = Diagnostico::with('animal', 'etapa', 'tratamientos')->find($id);
-        if (!$diagnostico) {
-            return response()->json(['success' => false, 'message' => 'Diagnóstico no encontrado'], Response::HTTP_NOT_FOUND);
+        try {
+            $diagnostico = $this->diagnosticoService->getDiagnosticoById((int)$id, request()->user());
+            
+            return response()->json([
+                'success' => true, 
+                'message' => 'Diagnóstico obtenido exitosamente',
+                'data'    => $this->formatResource(DiagnosticoResource::class, $diagnostico)
+            ], Response::HTTP_OK);
+        } catch (ModelNotFoundException $e) {
+            return response()->json([
+                'success' => false, 
+                'message' => 'Diagnóstico no encontrado'
+            ], Response::HTTP_NOT_FOUND);
         }
-        return response()->json(['success' => true, 'data' => $diagnostico]);
     }
 
     public function update(Request $request, $id)
     {
-        $diagnostico = Diagnostico::find($id);
-        if (!$diagnostico) {
-            return response()->json(['success' => false, 'message' => 'Diagnóstico no encontrado'], Response::HTTP_NOT_FOUND);
-        }
-
         $validator = Validator::make($request->all(), [
-            'diagnostico_descripcion' => 'nullable|string',
-            'diagnostico_tipo'        => 'nullable|string|max:30',
-            'diagnostico_fecha'       => 'nullable|date',
+            'descripcion'     => 'nullable|string',
+            'tipo'            => 'nullable|string|max:30',
+            'fecha'           => 'nullable|date',
+            'animal_etapa_id' => 'nullable|exists:animal_etapa,id',
+            'animal_id'       => 'nullable|exists:animals,id',
+            'etapa_id'        => 'nullable|exists:etapas,id',
         ]);
 
         if ($validator->fails()) {
-            return response()->json(['success' => false, 'errors' => $validator->errors()], Response::HTTP_UNPROCESSABLE_ENTITY);
+            return response()->json([
+                'success' => false, 
+                'message' => 'Datos de validación incorrectos',
+                'errors'  => $validator->errors()
+            ], Response::HTTP_UNPROCESSABLE_ENTITY);
         }
 
-        $diagnostico->update($request->only(['diagnostico_descripcion', 'diagnostico_tipo', 'diagnostico_fecha']));
+        try {
+            $diagnostico = $this->diagnosticoService->updateDiagnostico((int)$id, $request->only([
+                'descripcion', 'tipo', 'fecha', 'animal_etapa_id', 'animal_id', 'etapa_id'
+            ]), $request->user());
 
-        return response()->json(['success' => true, 'message' => 'Diagnóstico actualizado', 'data' => $diagnostico]);
+            return response()->json([
+                'success' => true, 
+                'message' => 'Diagnóstico actualizado exitosamente', 
+                'data'    => $this->formatResource(DiagnosticoResource::class, $diagnostico)
+            ], Response::HTTP_OK);
+        } catch (ModelNotFoundException $e) {
+            return response()->json([
+                'success' => false, 
+                'message' => 'Diagnóstico no encontrado'
+            ], Response::HTTP_NOT_FOUND);
+        } catch (AuthorizationException $e) {
+            return response()->json([
+                'success' => false,
+                'message' => $e->getMessage()
+            ], Response::HTTP_FORBIDDEN);
+        }
     }
 
     public function destroy($id)
     {
-        $diagnostico = Diagnostico::find($id);
-        if (!$diagnostico) {
-            return response()->json(['success' => false, 'message' => 'Diagnóstico no encontrado'], Response::HTTP_NOT_FOUND);
+        try {
+            $this->diagnosticoService->deleteDiagnostico((int)$id, request()->user());
+            
+            return response()->json([
+                'success' => true, 
+                'message' => 'Diagnóstico eliminado exitosamente'
+            ], Response::HTTP_OK);
+        } catch (ModelNotFoundException $e) {
+            return response()->json([
+                'success' => false, 
+                'message' => 'Diagnóstico no encontrado'
+            ], Response::HTTP_NOT_FOUND);
+        } catch (AuthorizationException $e) {
+            return response()->json([
+                'success' => false,
+                'message' => $e->getMessage()
+            ], Response::HTTP_FORBIDDEN);
         }
-        $diagnostico->delete();
-        return response()->json(['success' => true, 'message' => 'Diagnóstico eliminado']);
     }
 }

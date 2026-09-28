@@ -3,85 +3,104 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
-use App\Models\Animal;
-use App\Models\Rebano;
-use App\Models\EstadoAnimal;
-use App\Models\EtapaAnimal;
-use App\Models\PesoCorporal;
-use App\Services\AnimalEtapaClassifierService;
+use App\Services\Animal\AnimalService;
+use App\Services\Sanidad\EstadoAnimalService;
+use App\Services\Animal\AnimalEtapaService;
+use App\Services\Animal\AnimalImportService;
+use App\Http\Requests\Animal\CSVRequest;
+use App\Http\Resources\Animal\AnimalResource;
+use App\Http\Resources\Sanidad\EstadoAnimalResource;
+use App\Http\Resources\Animal\EtapaAnimalResource;
+use App\Http\Middleware\Legacy\Animal\NormalizeIndex;
+use App\Http\Middleware\Legacy\Animal\NormalizeStore;
+use App\Http\Middleware\Legacy\Animal\NormalizeShow;
+use App\Http\Middleware\Legacy\Animal\NormalizeUpdate;
+use App\Http\Middleware\Legacy\Animal\NormalizeCreateEstado;
+use App\Http\Middleware\Legacy\Animal\NormalizeUpdateEstado;
+use App\Http\Middleware\Legacy\Animal\NormalizeCreateEtapa;
+use App\Http\Middleware\Legacy\Animal\NormalizeUpdateEtapa;
 use Illuminate\Http\Request;
 use Illuminate\Http\Response;
 use Illuminate\Support\Facades\Validator;
+use Illuminate\Auth\Access\AuthorizationException;
+use Illuminate\Database\Eloquent\ModelNotFoundException;
+use Symfony\Component\HttpKernel\Exception\ConflictHttpException;
 
 class AnimalController extends Controller
 {
-    public function __construct(private AnimalEtapaClassifierService $etapaClassifier)
-    {
+    /**
+     * Constructor del controlador.
+     * Inyecta los servicios e introduce los middlewares de compatibilidad legacy.
+     */
+    public function __construct(
+        private AnimalService $animalService,
+        private EstadoAnimalService $estadoService,
+        private AnimalEtapaService $etapaService,
+        private AnimalImportService $animalImportService
+    ) {
+        $this->middleware(NormalizeIndex::class)->only('index');
+        $this->middleware(NormalizeStore::class)->only('store');
+        $this->middleware(NormalizeShow::class)->only('show');
+        $this->middleware(NormalizeUpdate::class)->only('update');
+        $this->middleware(NormalizeCreateEstado::class)->only('createEstadoAnimal');
+        $this->middleware(NormalizeUpdateEstado::class)->only('updateEstadoAnimal');
+        $this->middleware(NormalizeCreateEtapa::class)->only('createEtapaAnimal');
+        $this->middleware(NormalizeUpdateEtapa::class)->only('updateEtapaAnimal');
     }
 
     /**
-     * Display a listing of animals.
+     * Devuelve una lista paginada de animales aplicando filtros y permisos.
+     *
+     * @param Request $request
+     * @return \Illuminate\Http\JsonResponse
      */
     public function index(Request $request)
     {
-        $user = $request->user();
-        
-        // Build query with filters
-        $query = Animal::with(['rebano.finca.propietario', 'composicionRaza'])
-            ->active();
+        try {
+            $animals = $this->animalService->listAnimals(
+                $request->only(['finca_id', 'rebano_id', 'sexo', 'nopaginate', 'archivado', 'incluir_archivados']),
+                $request->user()
+            );
             
-        // Apply filters
-        if ($request->has('rebano_id')) {
-            $query->forRebano($request->rebano_id);
+            return response()->json([
+                'success' => true,
+                'message' => 'Lista de animales',
+                'data' => $this->formatCollection(AnimalResource::class, $animals)
+            ]);
+        } catch (AuthorizationException $e) {
+            return response()->json([
+                'success' => false,
+                'message' => $e->getMessage()
+            ], Response::HTTP_FORBIDDEN);
         }
-        
-        if ($request->has('sexo')) {
-            $query->bySex($request->sexo);
-        }
-        
-        // If user is admin, show all animals
-        if ($user->isAdmin()) {
-            $animals = $query->paginate(15);
-        } else {
-            // If user is propietario, show only animals from their fincas
-            $propietario = $user->propietario;
-            if (!$propietario) {
-                return response()->json([
-                    'success' => false,
-                    'message' => 'Usuario no es propietario'
-                ], Response::HTTP_FORBIDDEN);
-            }
-            
-            $animals = $query->whereHas('rebano.finca', function ($q) use ($propietario) {
-                $q->where('id_Propietario', $propietario->id);
-            })->paginate(15);
-        }
-
-        return response()->json([
-            'success' => true,
-            'message' => 'Lista de animales',
-            'data' => $animals
-        ]);
     }
 
     /**
-     * Store a newly created animal.
+     * Registra un nuevo animal en el sistema con sus datos iniciales.
+     *
+     * @param Request $request
+     * @return \Illuminate\Http\JsonResponse
      */
     public function store(Request $request)
     {
+        if ($request->has('sexo')) {
+            $sex = strtoupper((string) $request->sexo);
+            $request->merge(['sexo' => $sex]);
+        }
+
         $validator = Validator::make($request->all(), [
-            'id_Rebano' => 'required|exists:rebano,id_Rebano',
-            'Nombre' => 'nullable|string|max:25',
-            'codigo_animal' => 'nullable|string|max:20|unique:animal,codigo_animal',
-            'Sexo' => 'required|in:M,F',
+            'rebano_id' => 'required|exists:rebanos,id',
+            'nombre' => 'nullable|string|max:25',
+            'codigo_animal' => 'nullable|string|max:20|unique:animals,codigo_animal',
+            'sexo' => 'required|in:M,H',
             'fecha_nacimiento' => 'required|date',
-            'Procedencia' => 'nullable|string|max:50',
-            'fk_composicion_raza' => 'required|integer',
+            'procedencia' => 'nullable|string|max:50',
+            'composicion_raza_id' => 'required|exists:composicion_razas,id',
             'estado_inicial' => 'nullable|array',
-            'estado_inicial.estado_id' => 'required_with:estado_inicial|exists:estado_salud,estado_id',
+            'estado_inicial.estado_salud_id' => 'required_with:estado_inicial|exists:estado_saluds,id',
             'estado_inicial.fecha_ini' => 'required_with:estado_inicial|date',
             'etapa_inicial' => 'nullable|array',
-            'etapa_inicial.etapa_id' => 'required_with:etapa_inicial|exists:etapa,etapa_id',
+            'etapa_inicial.etapa_id' => 'required_with:etapa_inicial|exists:etapas,id',
             'etapa_inicial.fecha_ini' => 'required_with:etapa_inicial|date',
         ]);
 
@@ -93,146 +112,82 @@ class AnimalController extends Controller
             ], Response::HTTP_UNPROCESSABLE_ENTITY);
         }
 
-        $user = $request->user();
-        
-        // Check permissions: admin can create for any rebano, propietario only for their rebanos
-        if (!$user->isAdmin()) {
-            $propietario = $user->propietario;
-            if (!$propietario) {
-                return response()->json([
-                    'success' => false,
-                    'message' => 'Usuario no es propietario'
-                ], Response::HTTP_FORBIDDEN);
-            }
+        try {
+            [$animal, $clasificacion] = $this->animalService->storeAnimal($request->all(), $request->user());
             
-            $rebano = Rebano::with('finca')->find($request->id_Rebano);
-            if (!$rebano || $rebano->finca->id_Propietario != $propietario->id) {
-                return response()->json([
-                    'success' => false,
-                    'message' => 'No tiene permisos para crear animal en este rebaño'
-                ], Response::HTTP_FORBIDDEN);
-            }
-        }
-
-        $animal = Animal::create([
-            'id_Rebano' => $request->id_Rebano,
-            'Nombre' => $request->Nombre,
-            'codigo_animal' => $request->codigo_animal,
-            'Sexo' => $request->Sexo,
-            'fecha_nacimiento' => $request->fecha_nacimiento,
-            'Procedencia' => $request->Procedencia,
-            'fk_composicion_raza' => $request->fk_composicion_raza,
-            'archivado' => false
-        ]);
-
-        // Create initial estado if provided
-        if ($request->has('estado_inicial')) {
-            EstadoAnimal::create([
-                'esan_fecha_ini' => $request->estado_inicial['fecha_ini'],
-                'esan_fecha_fin' => null,
-                'esan_fk_estado_id' => $request->estado_inicial['estado_id'],
-                'esan_fk_id_animal' => $animal->id_Animal,
+            $animal->load([
+                'rebano.finca.propietario.persona', 
+                'composicionRaza',
+                'estadoActual.estadoSalud',
+                'etapaActual.etapa'
             ]);
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Animal creado exitosamente',
+                'data' => $this->formatResource(AnimalResource::class, $animal),
+                'clasificacion_etaria' => $clasificacion,
+            ], Response::HTTP_CREATED);
+        } catch (AuthorizationException $e) {
+            return response()->json([
+                'success' => false,
+                'message' => $e->getMessage()
+            ], Response::HTTP_FORBIDDEN);
         }
-
-        // Create initial etapa if provided
-        if ($request->has('etapa_inicial')) {
-            EtapaAnimal::create([
-                'etan_fecha_ini' => $request->etapa_inicial['fecha_ini'],
-                'etan_fecha_fin' => null,
-                'etan_animal_id' => $animal->id_Animal,
-                'etan_etapa_id' => $request->etapa_inicial['etapa_id'],
-            ]);
-        }
-
-        // Always sync etapa by business rules after create.
-        $lastWeight = PesoCorporal::where('peso_etapa_anid', $animal->id_Animal)
-            ->orderByDesc('Fecha_Peso')
-            ->value('Peso');
-        $clasificacion = $this->etapaClassifier->syncCurrentEtapa($animal, $lastWeight !== null ? (float) $lastWeight : null);
-
-        $animal->load([
-            'rebano.finca.propietario', 
-            'composicionRaza',
-            'estadoActual.estadoSalud',
-            'etapaActual.etapa'
-        ]);
-
-        return response()->json([
-            'success' => true,
-            'message' => 'Animal creado exitosamente',
-            'data' => $animal,
-            'clasificacion_etaria' => $clasificacion,
-        ], Response::HTTP_CREATED);
     }
 
     /**
-     * Display the specified animal.
+     * Muestra el detalle completo de un animal específico.
+     *
+     * @param Request $request
+     * @param mixed $id
+     * @return \Illuminate\Http\JsonResponse
      */
     public function show(Request $request, $id)
     {
-        $animal = Animal::with([
-            'rebano.finca.propietario', 
-//            'composicionRaza',
-//            'pesosCorporales',
-//            'registrosCelo',
-//            'reproducciones',
-//            'servicios',
-            'estados.estadoSalud',
-//            'estadoActual.estadoSalud',
-            'etapaAnimales.etapa',
-            'etapaActual.etapa'
-        ])->find($id);
+        try {
+            $animal = $this->animalService->getAnimal((int) $id, $request->user());
 
-        if (!$animal) {
+            return response()->json([
+                'success' => true,
+                'message' => 'Detalle de animal',
+                'data' => $this->formatResource(AnimalResource::class, $animal)
+            ]);
+        } catch (ModelNotFoundException $e) {
             return response()->json([
                 'success' => false,
                 'message' => 'Animal no encontrado'
             ], Response::HTTP_NOT_FOUND);
+        } catch (AuthorizationException $e) {
+            return response()->json([
+                'success' => false,
+                'message' => $e->getMessage()
+            ], Response::HTTP_FORBIDDEN);
         }
-
-        $user = $request->user();
-        
-        // Check permissions: admin can see all, propietario only their own
-        if (!$user->isAdmin()) {
-            $propietario = $user->propietario;
-            if (!$propietario || $animal->rebano->finca->id_Propietario != $propietario->id) {
-                return response()->json([
-                    'success' => false,
-                    'message' => 'No tiene permisos para ver este animal'
-                ], Response::HTTP_FORBIDDEN);
-            }
-        }
-
-        return response()->json([
-            'success' => true,
-            'message' => 'Detalle de animal',
-            'data' => $animal
-        ]);
     }
 
     /**
-     * Update the specified animal.
+     * Actualiza los datos de un animal y recalcula su clasificación etaria.
+     *
+     * @param Request $request
+     * @param mixed $id
+     * @return \Illuminate\Http\JsonResponse
      */
     public function update(Request $request, $id)
     {
-        $animal = Animal::find($id);
-
-        if (!$animal) {
-            return response()->json([
-                'success' => false,
-                'message' => 'Animal no encontrado'
-            ], Response::HTTP_NOT_FOUND);
+        if ($request->has('sexo')) {
+            $sex = strtoupper((string) $request->sexo);
+            $request->merge(['sexo' => $sex]);
         }
 
         $validator = Validator::make($request->all(), [
-            'id_Rebano' => 'sometimes|exists:rebano,id_Rebano',
-            'Nombre' => 'nullable|string|max:25',
-            'codigo_animal' => 'nullable|string|max:20|unique:animal,codigo_animal,' . $id . ',id_Animal',
-            'Sexo' => 'sometimes|in:M,F',
+            'rebano_id' => 'sometimes|exists:rebanos,id',
+            'nombre' => 'nullable|string|max:25',
+            'codigo_animal' => 'nullable|string|max:20|unique:animals,codigo_animal,' . $id . ',id',
+            'sexo' => 'sometimes|in:M,H',
             'fecha_nacimiento' => 'sometimes|date',
-            'Procedencia' => 'nullable|string|max:50',
-            'fk_composicion_raza' => 'sometimes|integer'
+            'procedencia' => 'nullable|string|max:50',
+            'composicion_raza_id' => 'sometimes|exists:composicion_razas,id'
         ]);
 
         if ($validator->fails()) {
@@ -243,117 +198,132 @@ class AnimalController extends Controller
             ], Response::HTTP_UNPROCESSABLE_ENTITY);
         }
 
-        $user = $request->user();
-        
-        // Check permissions: admin can update all, propietario only their own
-        if (!$user->isAdmin()) {
-            $propietario = $user->propietario;
-            if (!$propietario || $animal->rebano->finca->id_Propietario != $propietario->id) {
-                return response()->json([
-                    'success' => false,
-                    'message' => 'No tiene permisos para actualizar este animal'
-                ], Response::HTTP_FORBIDDEN);
-            }
+        try {
+            [$animal, $clasificacion] = $this->animalService->updateAnimal((int) $id, $request->all(), $request->user());
             
-            // If changing rebano, check permissions on new rebano
-            if ($request->has('id_Rebano')) {
-                $newRebano = Rebano::with('finca')->find($request->id_Rebano);
-                if (!$newRebano || $newRebano->finca->id_Propietario != $propietario->id) {
-                    return response()->json([
-                        'success' => false,
-                        'message' => 'No tiene permisos para mover el animal a ese rebaño'
-                    ], Response::HTTP_FORBIDDEN);
-                }
-            }
+            $animal->load(['rebano.finca.propietario.persona', 'composicionRaza', 'etapaActual.etapa']);
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Animal actualizado exitosamente',
+                'data' => $this->formatResource(AnimalResource::class, $animal),
+                'clasificacion_etaria' => $clasificacion,
+            ]);
+        } catch (ModelNotFoundException $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Animal no encontrado'
+            ], Response::HTTP_NOT_FOUND);
+        } catch (AuthorizationException $e) {
+            return response()->json([
+                'success' => false,
+                'message' => $e->getMessage()
+            ], Response::HTTP_FORBIDDEN);
         }
-
-        $animal->update($request->only([
-            'id_Rebano', 'Nombre', 'codigo_animal', 'Sexo', 
-            'fecha_nacimiento', 'Procedencia', 'fk_composicion_raza'
-        ]));
-
-        $lastWeight = PesoCorporal::where('peso_etapa_anid', $animal->id_Animal)
-            ->orderByDesc('Fecha_Peso')
-            ->value('Peso');
-        $clasificacion = $this->etapaClassifier->syncCurrentEtapa($animal, $lastWeight !== null ? (float) $lastWeight : null);
-        
-        $animal->load(['rebano.finca.propietario', 'composicionRaza', 'etapaActual.etapa']);
-
-        return response()->json([
-            'success' => true,
-            'message' => 'Animal actualizado exitosamente',
-            'data' => $animal,
-            'clasificacion_etaria' => $clasificacion,
-        ]);
     }
 
     /**
-     * Remove the specified animal (soft delete).
+     * Elimina definitivamente un animal de la base de datos.
+     *
+     * @param Request $request
+     * @param mixed $id
+     * @return \Illuminate\Http\JsonResponse
      */
     public function destroy(Request $request, $id)
     {
-        $animal = Animal::find($id);
+        try {
+            $this->animalService->deleteAnimal((int) $id, $request->user());
 
-        if (!$animal) {
+            return response()->json([
+                'success' => true,
+                'message' => 'Animal eliminado exitosamente'
+            ]);
+        } catch (ModelNotFoundException $e) {
             return response()->json([
                 'success' => false,
                 'message' => 'Animal no encontrado'
             ], Response::HTTP_NOT_FOUND);
+        } catch (AuthorizationException $e) {
+            return response()->json([
+                'success' => false,
+                'message' => $e->getMessage()
+            ], Response::HTTP_FORBIDDEN);
         }
-
-        $user = $request->user();
-        
-        // Check permissions: admin can delete all, propietario only their own
-        if (!$user->isAdmin()) {
-            $propietario = $user->propietario;
-            if (!$propietario || $animal->rebano->finca->id_Propietario != $propietario->id) {
-                return response()->json([
-                    'success' => false,
-                    'message' => 'No tiene permisos para eliminar este animal'
-                ], Response::HTTP_FORBIDDEN);
-            }
-        }
-
-        // Soft delete by setting archivado = true
-        $animal->update(['archivado' => true]);
-
-        return response()->json([
-            'success' => true,
-            'message' => 'Animal eliminado exitosamente'
-        ]);
     }
 
     /**
-     * Create a new estado animal for the animal.
+     * Archiva un animal específico.
+     *
+     * @param Request $request
+     * @param mixed $id
+     * @return \Illuminate\Http\JsonResponse
+     */
+    public function archive(Request $request, $id)
+    {
+        try {
+            $animal = $this->animalService->archiveAnimal((int) $id, $request->user());
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Animal archivado exitosamente',
+                'data' => $this->formatResource(AnimalResource::class, $animal)
+            ]);
+        } catch (ModelNotFoundException $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Animal no encontrado'
+            ], Response::HTTP_NOT_FOUND);
+        } catch (AuthorizationException $e) {
+            return response()->json([
+                'success' => false,
+                'message' => $e->getMessage()
+            ], Response::HTTP_FORBIDDEN);
+        }
+    }
+
+    /**
+     * Desarchiva un animal previamente archivado.
+     *
+     * @param Request $request
+     * @param mixed $id
+     * @return \Illuminate\Http\JsonResponse
+     */
+    public function unarchive(Request $request, $id)
+    {
+        try {
+            $animal = $this->animalService->unarchiveAnimal((int) $id, $request->user());
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Animal desarchivado exitosamente',
+                'data' => $this->formatResource(AnimalResource::class, $animal)
+            ], Response::HTTP_OK);
+        } catch (ModelNotFoundException $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Animal no encontrado'
+            ], Response::HTTP_NOT_FOUND);
+        } catch (AuthorizationException $e) {
+            return response()->json([
+                'success' => false,
+                'message' => $e->getMessage()
+            ], Response::HTTP_FORBIDDEN);
+        }
+    }
+
+    /**
+     * Registra un nuevo estado de salud en el historial del animal.
+     *
+     * @param Request $request
+     * @param mixed $id
+     * @return \Illuminate\Http\JsonResponse
      */
     public function createEstadoAnimal(Request $request, $id)
     {
-        $animal = Animal::find($id);
-
-        if (!$animal) {
-            return response()->json([
-                'success' => false,
-                'message' => 'Animal no encontrado'
-            ], Response::HTTP_NOT_FOUND);
-        }
-
-        $user = $request->user();
-        
-        // Check permissions
-        if (!$user->isAdmin()) {
-            $propietario = $user->propietario;
-            if (!$propietario || $animal->rebano->finca->id_Propietario != $propietario->id) {
-                return response()->json([
-                    'success' => false,
-                    'message' => 'No tiene permisos para crear estado para este animal'
-                ], Response::HTTP_FORBIDDEN);
-            }
-        }
-
         $validator = Validator::make($request->all(), [
-            'esan_fecha_ini' => 'required|date',
-            'esan_fecha_fin' => 'nullable|date|after_or_equal:esan_fecha_ini',
-            'esan_fk_estado_id' => 'required|exists:estado_salud,estado_id',
+            'fecha_ini' => 'required|date',
+            'fecha_fin' => 'nullable|date|after_or_equal:fecha_ini',
+            'estado_salud_id' => 'required|exists:estado_saluds,id',
         ]);
 
         if ($validator->fails()) {
@@ -364,60 +334,42 @@ class AnimalController extends Controller
             ], Response::HTTP_UNPROCESSABLE_ENTITY);
         }
 
-        // If creating an active estado (no end date), close any existing active estado
-        if (!$request->has('esan_fecha_fin') || $request->esan_fecha_fin === null) {
-            EstadoAnimal::where('esan_fk_id_animal', $animal->id_Animal)
-                ->whereNull('esan_fecha_fin')
-                ->update(['esan_fecha_fin' => now()->toDateString()]);
+        try {
+            $data = $request->all();
+            $data['animal_id'] = (int) $id;
+            $estadoAnimal = $this->estadoService->createEstado($data, $request->user());
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Estado animal creado exitosamente',
+                'data' => $this->formatResource(EstadoAnimalResource::class, $estadoAnimal)
+            ], Response::HTTP_CREATED);
+        } catch (ModelNotFoundException $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Animal no encontrado'
+            ], Response::HTTP_NOT_FOUND);
+        } catch (AuthorizationException $e) {
+            return response()->json([
+                'success' => false,
+                'message' => $e->getMessage()
+            ], Response::HTTP_FORBIDDEN);
         }
-
-        $estadoAnimal = EstadoAnimal::create([
-            'esan_fecha_ini' => $request->esan_fecha_ini,
-            'esan_fecha_fin' => $request->esan_fecha_fin,
-            'esan_fk_estado_id' => $request->esan_fk_estado_id,
-            'esan_fk_id_animal' => $animal->id_Animal,
-        ]);
-
-        $estadoAnimal->load(['estadoSalud', 'animal']);
-
-        return response()->json([
-            'success' => true,
-            'message' => 'Estado animal creado exitosamente',
-            'data' => $estadoAnimal
-        ], Response::HTTP_CREATED);
     }
 
     /**
-     * Create a new etapa animal for the animal.
+     * Registra un nuevo cambio de etapa manual en el historial del animal.
+     *
+     * @param Request $request
+     * @param mixed $id
+     * @return \Illuminate\Http\JsonResponse
      */
     public function createEtapaAnimal(Request $request, $id)
     {
-        $animal = Animal::find($id);
-
-        if (!$animal) {
-            return response()->json([
-                'success' => false,
-                'message' => 'Animal no encontrado'
-            ], Response::HTTP_NOT_FOUND);
-        }
-
-        $user = $request->user();
-        
-        // Check permissions
-        if (!$user->isAdmin()) {
-            $propietario = $user->propietario;
-            if (!$propietario || $animal->rebano->finca->id_Propietario != $propietario->id) {
-                return response()->json([
-                    'success' => false,
-                    'message' => 'No tiene permisos para crear etapa para este animal'
-                ], Response::HTTP_FORBIDDEN);
-            }
-        }
-
         $validator = Validator::make($request->all(), [
-            'etan_fecha_ini' => 'required|date',
-            'etan_fecha_fin' => 'nullable|date|after_or_equal:etan_fecha_ini',
-            'etan_etapa_id' => 'required|exists:etapa,etapa_id',
+            'fecha_ini' => 'required|date',
+            'fecha_fin' => 'nullable|date|after_or_equal:fecha_ini',
+            'etapa_id' => 'required|exists:etapas,id',
         ]);
 
         if ($validator->fails()) {
@@ -428,83 +380,46 @@ class AnimalController extends Controller
             ], Response::HTTP_UNPROCESSABLE_ENTITY);
         }
 
-        // Check if etapa_animal record already exists
-        $existingEtapaAnimal = EtapaAnimal::where('etan_animal_id', $animal->id_Animal)
-            ->where('etan_etapa_id', $request->etan_etapa_id)
-            ->first();
+        try {
+            $etapaAnimal = $this->etapaService->createEtapa((int) $id, $request->all(), $request->user());
 
-        if ($existingEtapaAnimal) {
+            return response()->json([
+                'success' => true,
+                'message' => 'Etapa animal creada exitosamente',
+                'data' => $this->formatResource(EtapaAnimalResource::class, $etapaAnimal)
+            ], Response::HTTP_CREATED);
+        } catch (ModelNotFoundException $e) {
             return response()->json([
                 'success' => false,
-                'message' => 'Ya existe un registro de etapa animal para esta etapa'
+                'message' => 'Animal no encontrado'
+            ], Response::HTTP_NOT_FOUND);
+        } catch (ConflictHttpException $e) {
+            return response()->json([
+                'success' => false,
+                'message' => $e->getMessage()
             ], Response::HTTP_CONFLICT);
+        } catch (AuthorizationException $e) {
+            return response()->json([
+                'success' => false,
+                'message' => $e->getMessage()
+            ], Response::HTTP_FORBIDDEN);
         }
-
-        // If creating an active etapa (no end date), close any existing active etapa
-        if (!$request->has('etan_fecha_fin') || $request->etan_fecha_fin === null) {
-            EtapaAnimal::where('etan_animal_id', $animal->id_Animal)
-                ->whereNull('etan_fecha_fin')
-                ->update(['etan_fecha_fin' => now()->toDateString()]);
-        }
-
-        $etapaAnimal = EtapaAnimal::create([
-            'etan_fecha_ini' => $request->etan_fecha_ini,
-            'etan_fecha_fin' => $request->etan_fecha_fin,
-            'etan_animal_id' => $animal->id_Animal,
-            'etan_etapa_id' => $request->etan_etapa_id,
-        ]);
-
-        $etapaAnimal->load(['etapa', 'animal']);
-
-        return response()->json([
-            'success' => true,
-            'message' => 'Etapa animal creada exitosamente',
-            'data' => $etapaAnimal
-        ], Response::HTTP_CREATED);
     }
 
     /**
-     * Update an existing estado animal.
+     * Actualiza un registro existente del historial de estados de salud del animal.
+     *
+     * @param Request $request
+     * @param mixed $animalId
+     * @param mixed $estadoId
+     * @return \Illuminate\Http\JsonResponse
      */
     public function updateEstadoAnimal(Request $request, $animalId, $estadoId)
     {
-        $animal = Animal::find($animalId);
-
-        if (!$animal) {
-            return response()->json([
-                'success' => false,
-                'message' => 'Animal no encontrado'
-            ], Response::HTTP_NOT_FOUND);
-        }
-
-        $estadoAnimal = EstadoAnimal::where('esan_fk_id_animal', $animalId)
-            ->where('esan_id', $estadoId)
-            ->first();
-
-        if (!$estadoAnimal) {
-            return response()->json([
-                'success' => false,
-                'message' => 'Estado animal no encontrado'
-            ], Response::HTTP_NOT_FOUND);
-        }
-
-        $user = $request->user();
-        
-        // Check permissions
-        if (!$user->isAdmin()) {
-            $propietario = $user->propietario;
-            if (!$propietario || $animal->rebano->finca->id_Propietario != $propietario->id) {
-                return response()->json([
-                    'success' => false,
-                    'message' => 'No tiene permisos para actualizar estado de este animal'
-                ], Response::HTTP_FORBIDDEN);
-            }
-        }
-
         $validator = Validator::make($request->all(), [
-            'esan_fecha_ini' => 'sometimes|date',
-            'esan_fecha_fin' => 'nullable|date|after_or_equal:esan_fecha_ini',
-            'esan_fk_estado_id' => 'sometimes|exists:estado_salud,estado_id',
+            'fecha_ini' => 'sometimes|date',
+            'fecha_fin' => 'nullable|date|after_or_equal:fecha_ini',
+            'estado_salud_id' => 'sometimes|exists:estado_saluds,id',
         ]);
 
         if ($validator->fails()) {
@@ -515,62 +430,40 @@ class AnimalController extends Controller
             ], Response::HTTP_UNPROCESSABLE_ENTITY);
         }
 
-        $estadoAnimal->update($request->only([
-            'esan_fecha_ini',
-            'esan_fecha_fin',
-            'esan_fk_estado_id'
-        ]));
+        try {
+            $estadoAnimal = $this->estadoService->updateEstado((int) $estadoId, $request->all(), $request->user());
 
-        $estadoAnimal->load(['estadoSalud', 'animal']);
-
-        return response()->json([
-            'success' => true,
-            'message' => 'Estado animal actualizado exitosamente',
-            'data' => $estadoAnimal
-        ], Response::HTTP_OK);
+            return response()->json([
+                'success' => true,
+                'message' => 'Estado animal actualizado exitosamente',
+                'data' => $this->formatResource(EstadoAnimalResource::class, $estadoAnimal)
+            ]);
+        } catch (ModelNotFoundException $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Animal o registro de estado no encontrado'
+            ], Response::HTTP_NOT_FOUND);
+        } catch (AuthorizationException $e) {
+            return response()->json([
+                'success' => false,
+                'message' => $e->getMessage()
+            ], Response::HTTP_FORBIDDEN);
+        }
     }
 
     /**
-     * Update an existing etapa animal.
+     * Actualiza un registro existente del historial de etapas del animal.
+     *
+     * @param Request $request
+     * @param mixed $animalId
+     * @param mixed $etapaId
+     * @return \Illuminate\Http\JsonResponse
      */
     public function updateEtapaAnimal(Request $request, $animalId, $etapaId)
     {
-        $animal = Animal::find($animalId);
-
-        if (!$animal) {
-            return response()->json([
-                'success' => false,
-                'message' => 'Animal no encontrado'
-            ], Response::HTTP_NOT_FOUND);
-        }
-
-        $etapaAnimal = EtapaAnimal::where('etan_animal_id', $animalId)
-            ->where('etan_etapa_id', $etapaId)
-            ->first();
-
-        if (!$etapaAnimal) {
-            return response()->json([
-                'success' => false,
-                'message' => 'Etapa animal no encontrada'
-            ], Response::HTTP_NOT_FOUND);
-        }
-
-        $user = $request->user();
-        
-        // Check permissions
-        if (!$user->isAdmin()) {
-            $propietario = $user->propietario;
-            if (!$propietario || $animal->rebano->finca->id_Propietario != $propietario->id) {
-                return response()->json([
-                    'success' => false,
-                    'message' => 'No tiene permisos para actualizar etapa de este animal'
-                ], Response::HTTP_FORBIDDEN);
-            }
-        }
-
         $validator = Validator::make($request->all(), [
-            'etan_fecha_ini' => 'sometimes|date',
-            'etan_fecha_fin' => 'nullable|date|after_or_equal:etan_fecha_ini',
+            'fecha_ini' => 'sometimes|date',
+            'fecha_fin' => 'nullable|date|after_or_equal:fecha_ini',
         ]);
 
         if ($validator->fails()) {
@@ -581,17 +474,68 @@ class AnimalController extends Controller
             ], Response::HTTP_UNPROCESSABLE_ENTITY);
         }
 
-        $etapaAnimal->update($request->only([
-            'etan_fecha_ini',
-            'etan_fecha_fin'
-        ]));
+        try {
+            $etapaAnimal = $this->etapaService->updateEtapa((int) $etapaId, $request->all(), $request->user());
 
-        $etapaAnimal->load(['etapa', 'animal']);
+            return response()->json([
+                'success' => true,
+                'message' => 'Etapa animal actualizada exitosamente',
+                'data' => $this->formatResource(EtapaAnimalResource::class, $etapaAnimal)
+            ]);
+        } catch (ModelNotFoundException $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Animal o registro de etapa no encontrada'
+            ], Response::HTTP_NOT_FOUND);
+        } catch (AuthorizationException $e) {
+            return response()->json([
+                'success' => false,
+                'message' => $e->getMessage()
+            ], Response::HTTP_FORBIDDEN);
+        }
+    }
 
-        return response()->json([
-            'success' => true,
-            'message' => 'Etapa animal actualizada exitosamente',
-            'data' => $etapaAnimal
-        ], Response::HTTP_OK);
+    /**
+     * Importación masiva de animales a rebaños a partir de archivo delimitado (.csv / .txt).
+     *
+     * @param CSVRequest $request
+     * @return \Illuminate\Http\JsonResponse
+     */
+    public function cargarAnimalesMasivo(CSVRequest $request)
+    {
+        try {
+            $result = $this->animalImportService->importFromCsv(
+                $request->file('archivo'),
+                (int) $request->finca_id,
+                $request->user()
+            );
+
+            return response()->json([
+                'success' => true,
+                'message' => "Se importaron {$result['total_procesados']} animales exitosamente.",
+                'data'    => [
+                    'total_procesados' => $result['total_procesados'],
+                    'rebanos_creados'  => $result['rebanos_creados'],
+                    'finca'            => $result['finca'],
+                    'animales'         => $this->formatCollection(AnimalResource::class, $result['animales']),
+                ]
+            ], Response::HTTP_CREATED);
+        } catch (AuthorizationException $e) {
+            return response()->json([
+                'success' => false,
+                'message' => $e->getMessage()
+            ], Response::HTTP_FORBIDDEN);
+        } catch (\Illuminate\Validation\ValidationException $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Errores de validación en los datos del archivo.',
+                'errors'  => $e->errors()
+            ], Response::HTTP_UNPROCESSABLE_ENTITY);
+        } catch (\Exception $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Ocurrió un error inesperado al procesar el archivo: ' . $e->getMessage()
+            ], Response::HTTP_INTERNAL_SERVER_ERROR);
+        }
     }
 }

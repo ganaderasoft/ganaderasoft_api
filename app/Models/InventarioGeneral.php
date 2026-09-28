@@ -9,35 +9,42 @@ class InventarioGeneral extends Model
 {
     use HasFactory;
 
-    protected $table = 'inventario_general';
-    protected $primaryKey = 'id_Inv';
-
     protected $fillable = [
-        'id_Finca',
-        'Num_Personal',
-        'Fecha_Inventario',
+        'finca_id',
+        'num_personal',
+        'fecha_inventario',
     ];
 
     protected $casts = [
-        'Num_Personal'     => 'integer',
-        'Fecha_Inventario' => 'date',
+        'num_personal' => 'integer',
+        'fecha_inventario' => 'date',
     ];
 
+    /**
+     * Obtener finca asociado/a.
+     */
     public function finca()
     {
-        return $this->belongsTo(Finca::class, 'id_Finca', 'id_Finca');
+        return $this->belongsTo(Finca::class, 'finca_id', 'id');
     }
 
+    /**
+     * Filtro para buscar por for finca.
+     */
     public function scopeForFinca($query, $fincaId)
     {
-        return $query->where('id_Finca', $fincaId);
+        return $query->where('finca_id', $fincaId);
     }
 
+    /**
+     * Filtro para buscar por by date range.
+     */
     public function scopeByDateRange($query, $startDate, $endDate = null)
     {
         if ($endDate) {
-            return $query->whereBetween('Fecha_Inventario', [$startDate, $endDate]);
+            return $query->whereBetween('fecha_inventario', [$startDate, $endDate]);
         }
-        return $query->where('Fecha_Inventario', '>=', $startDate);
+
+        return $query->where('fecha_inventario', '>=', $startDate);
     }
 }
