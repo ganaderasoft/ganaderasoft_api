@@ -3,10 +3,7 @@ name: Deploy backend to docker
 on:
   push:
     branches:
-      - features/equipo_ucv
-  pull_request:
-    branches:
-      - features/equipo_ucv
+      - main
 
 jobs:
   deploy:
