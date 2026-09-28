@@ -1,6 +1,6 @@
 # GanaderaSoft API
 
-**Sistema de Gestión Ganadera - API Gateway**
+**Sistema de Gestión Ganadera - API REST Core**
 
 GanaderaSoft API es una aplicación REST API desarrollada en Laravel 10.x para la gestión integral de operaciones ganaderas, enfocada principalmente en el manejo de ganado búfalo y otras especies pecuarias.
 
@@ -73,40 +73,6 @@ El proyecto maneja dos entornos con comportamientos diferentes:
    - Proxy externo: **Nginx** nativo en el servidor VPS (Reverse Proxy hacia Docker).
    - Procesador PHP: **PHP-FPM 8.2** ejecutándose internamente en el contenedor.
    - Base de datos: Servidor **MySQL** externo a la red de los contenedores web.
-
-## 3. 🔗 Endpoints principales
-
-### Autenticación
-- `POST /api/auth/login` - Inicio de sesión
-- `GET /api/profile` - Perfil del usuario
-- `POST /api/auth/logout` - Cerrar sesión
-
-### Gestión de entidades
-- **Fincas**: `/api/fincas`
-- **Propietarios**: `/api/propietarios`
-- **Rebaños**: `/api/rebanos`
-- **Animales**: `/api/animales`
-- **Inventario búfalo**: `/api/inventarios-bufalo`
-- **Tipos de animal**: `/api/tipos-animal`
-- **Estados de salud**: `/api/estados-salud`
-- **Etapas**: `/api/etapas`
-- **Personal de finca**: `/api/personal-finca`
-
-### Seguimiento y control
-- **Peso corporal**: `/api/peso-corporal`
-- **Medidas corporales**: `/api/medidas-corporales`
-- **Lactancia**: `/api/lactancia`
-- **Producción de leche**: `/api/leche`
-- **Cambios de animal**: `/api/cambios-animal`
-
-### Configuración
-- `/api/configuracion/tipo-explotacion`
-- `/api/configuracion/metodo-riego`
-- `/api/configuracion/ph-suelo`
-- `/api/configuracion/textura-suelo`
-- `/api/configuracion/fuente-agua`
-- `/api/configuracion/sexo`
-- `/api/configuracion/tipo-relieve`
 
 ## 🚀 Pasos para desarrollo local
 
@@ -272,15 +238,16 @@ networks:
 </details>
 
 ### 4. Configuración de la base de datos
-Para el entorno de desarrollo, el contenedor `ganaderasoft-db` de MySQL se encargará de proveer la base de datos con las siguientes credenciales configuradas por defecto:
+Para el entorno de desarrollo, el contenedor `ganaderasoft-db` de MySQL se encargará de proveer la base de datos con los parámetros configurados en el archivo `.env`:
 
-| Credencial | Valor |
-| :--- | :--- |
-| **Servidor / Host** | ganaderasoft-db |
-| **Puerto** | 3306 |
-| **Base de Datos** | ganaderasoft |
-| **Usuario** | ganaderasoft_user |
-| **Contraseña** | ganaderasoft_pass |
+| Variable / Parámetro | Valor por defecto (.env.dev) | Descripción |
+| :--- | :--- | :--- |
+| **DB_CONNECTION** | `mysql` | Motor de base de datos relacional. |
+| **DB_HOST** | `ganaderasoft-db` | Host del servicio contenedor de base de datos. |
+| **DB_PORT** | `3306` | Puerto de conexión a MySQL. |
+| **DB_DATABASE** | `ganaderasoft` | Nombre de la base de datos principal. |
+| **DB_USERNAME** | `ganaderasoft_user` | Usuario de base de datos. |
+| **DB_PASSWORD** | *(Configurada en .env)* | Contraseña del usuario definida en el entorno. |
 
 > [!IMPORTANT]
 > **Importación de datos y migraciones**: 
@@ -393,9 +360,6 @@ php artisan cache:clear
 
 # Ver rutas disponibles
 php artisan route:list
-
-# Generar documentación API
-php artisan l5-swagger:generate
 ```
 
 ## 📝 Notas importantes
@@ -404,10 +368,3 @@ php artisan l5-swagger:generate
 - Los datos de configuración se almacenan como archivos JSON estáticos
 - La aplicación está optimizada para gestión de ganado búfalo pero es extensible
 - Se incluyen relaciones complejas entre entidades para seguimiento completo
-
----
-
-**Versión**: 1.0.0  
-**Licencia**: MIT  
-**Framework**: Laravel 10.x  
-**PHP Version**: ^8.1
